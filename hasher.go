@@ -1,7 +1,6 @@
 package imcache
 
 import (
-	"hash"
 	"hash/fnv"
 )
 
@@ -13,15 +12,13 @@ type Hasher32 interface {
 
 // NewDefaultHasher32 returns a new Hasher32 that uses the FNV-1a algorithm.
 func NewDefaultHasher32() Hasher32 {
-	return hasher32{hash: fnv.New32a()}
+	return fnv32a{}
 }
 
-type hasher32 struct {
-	hash hash.Hash32
-}
+type fnv32a struct{}
 
-func (h hasher32) Sum32(s string) uint32 {
-	h.hash.Reset()
-	h.hash.Write([]byte(s))
-	return h.hash.Sum32()
+func (fnv32a) Sum32(s string) uint32 {
+	h := fnv.New32a()
+	h.Write([]byte(s))
+	return h.Sum32()
 }
