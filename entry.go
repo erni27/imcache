@@ -21,7 +21,7 @@ func (e *entry) HasNoExpiration() bool {
 
 // HasDefaultExpiration returns true if the entry has a default expiration.
 func (e *entry) HasDefaultExpiration() bool {
-	return e.expiration == defaultexp
+	return e.expiration == defaultExp
 }
 
 // HasSlidingExpiration returns true if the entry has a sliding expiration.
@@ -33,8 +33,8 @@ func (e *entry) HasSlidingExpiration() bool {
 // otherwise it does nothing.
 func (e *entry) SetDefault(now time.Time, d time.Duration, sliding bool) {
 	if e.HasDefaultExpiration() {
-		if d == noexpiration {
-			e.expiration = noexpiration
+		if d == noExp {
+			e.expiration = noExp
 			return
 		}
 		e.expiration = now.Add(d).UnixNano()

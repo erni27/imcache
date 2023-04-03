@@ -14,7 +14,7 @@ func TestEntry_HasExpired(t *testing.T) {
 	}{
 		{
 			name:  "no expiration",
-			entry: entry{val: "foo", expiration: noexpiration},
+			entry: entry{val: "foo", expiration: noExp},
 			now:   time.Now(),
 		},
 		{
@@ -46,7 +46,7 @@ func TestEntry_HasNoExpiration(t *testing.T) {
 	}{
 		{
 			name:  "no expiration",
-			entry: entry{val: "foo", expiration: noexpiration},
+			entry: entry{val: "foo", expiration: noExp},
 			want:  true,
 		},
 		{
@@ -75,7 +75,7 @@ func TestEntry_HasDefaultExpiration(t *testing.T) {
 	}{
 		{
 			name:  "no expiration",
-			entry: entry{val: "foo", expiration: noexpiration},
+			entry: entry{val: "foo", expiration: noExp},
 		},
 		{
 			name:  "expired",
@@ -87,7 +87,7 @@ func TestEntry_HasDefaultExpiration(t *testing.T) {
 		},
 		{
 			name:  "default expiration",
-			entry: entry{val: "foo", expiration: defaultexp},
+			entry: entry{val: "foo", expiration: defaultExp},
 			want:  true,
 		},
 	}
@@ -108,7 +108,7 @@ func TestEntry_HasSlidingExpiration(t *testing.T) {
 	}{
 		{
 			name:  "no expiration",
-			entry: entry{val: "foo", expiration: noexpiration},
+			entry: entry{val: "foo", expiration: noExp},
 		},
 		{
 			name:  "expiration",
@@ -141,10 +141,10 @@ func TestEntry_SetDefault(t *testing.T) {
 	}{
 		{
 			name:  "no expiration",
-			entry: entry{val: "foo", expiration: noexpiration},
+			entry: entry{val: "foo", expiration: noExp},
 			now:   now,
 			d:     time.Second,
-			want:  entry{val: "foo", expiration: noexpiration},
+			want:  entry{val: "foo", expiration: noExp},
 		},
 		{
 			name:  "expiration",
@@ -155,14 +155,14 @@ func TestEntry_SetDefault(t *testing.T) {
 		},
 		{
 			name:  "default expiration",
-			entry: entry{val: "foo", expiration: defaultexp},
+			entry: entry{val: "foo", expiration: defaultExp},
 			now:   now,
 			d:     time.Second,
 			want:  entry{val: "foo", expiration: now.Add(time.Second).UnixNano()},
 		},
 		{
 			name:    "default sliding expiration",
-			entry:   entry{val: "foo", expiration: defaultexp},
+			entry:   entry{val: "foo", expiration: defaultExp},
 			now:     now,
 			d:       2 * time.Second,
 			sliding: true,
@@ -170,10 +170,10 @@ func TestEntry_SetDefault(t *testing.T) {
 		},
 		{
 			name:  "default no expiration",
-			entry: entry{val: "foo", expiration: defaultexp},
+			entry: entry{val: "foo", expiration: defaultExp},
 			now:   now,
-			d:     noexpiration,
-			want:  entry{val: "foo", expiration: noexpiration},
+			d:     noExp,
+			want:  entry{val: "foo", expiration: noExp},
 		},
 	}
 	for _, tt := range tests {

@@ -3,8 +3,8 @@ package imcache
 import "time"
 
 const (
-	noexpiration = -1
-	defaultexp   = 0
+	noExp      = -1
+	defaultExp = 0
 )
 
 // Expiration is the expiration time of an entry.
@@ -37,7 +37,7 @@ func WithSlidingExpiration(d time.Duration) Expiration {
 // WithNoExpiration returns an Expiration that sets the expiration time to never expire.
 func WithNoExpiration() Expiration {
 	return expirationf(func(e *entry) {
-		e.expiration = noexpiration
+		e.expiration = noExp
 	})
 }
 
@@ -45,6 +45,6 @@ func WithNoExpiration() Expiration {
 // default expiration time.
 func WithDefaultExpiration() Expiration {
 	return expirationf(func(e *entry) {
-		e.expiration = defaultexp
+		e.expiration = defaultExp
 	})
 }
