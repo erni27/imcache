@@ -12,7 +12,7 @@ func init() {
 }
 
 func BenchmarkGet(b *testing.B) {
-	c := New()
+	c := New[string, int]()
 	for i := 0; i < b.N; i++ {
 		c.Set(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
 	}
@@ -27,7 +27,7 @@ func BenchmarkGet(b *testing.B) {
 }
 
 func BenchmarkGet_Concurrent(b *testing.B) {
-	c := New()
+	c := New[string, int]()
 	for i := 0; i < b.N; i++ {
 		c.Set(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
 	}
@@ -46,7 +46,7 @@ func BenchmarkGet_Concurrent(b *testing.B) {
 func BenchmarkGet_Sharded(b *testing.B) {
 	for _, n := range []int{2, 4, 8, 16, 32, 64, 128, 256, 512, 1024} {
 		b.Run(fmt.Sprintf("%d shards", n), func(b *testing.B) {
-			c := NewSharded(n, NewDefaultHasher32())
+			c := NewSharded[string, int](n, DefaultStringHasher64{})
 			for i := 0; i < b.N; i++ {
 				c.Set(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
 			}
@@ -65,7 +65,7 @@ func BenchmarkGet_Sharded(b *testing.B) {
 func BenchmarkGet_Sharded_Concurrent(b *testing.B) {
 	for _, n := range []int{2, 4, 8, 16, 32, 64, 128, 256, 512, 1024} {
 		b.Run(fmt.Sprintf("%d shards", n), func(b *testing.B) {
-			c := NewSharded(n, NewDefaultHasher32())
+			c := NewSharded[string, int](n, DefaultStringHasher64{})
 			for i := 0; i < b.N; i++ {
 				c.Set(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
 			}
@@ -84,7 +84,7 @@ func BenchmarkGet_Sharded_Concurrent(b *testing.B) {
 }
 
 func BenchmarkSet(b *testing.B) {
-	c := New()
+	c := New[string, int]()
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -95,7 +95,7 @@ func BenchmarkSet(b *testing.B) {
 }
 
 func BenchmarkSet_Concurrent(b *testing.B) {
-	c := New()
+	c := New[string, int]()
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -110,7 +110,7 @@ func BenchmarkSet_Concurrent(b *testing.B) {
 func BenchmarkSet_Sharded(b *testing.B) {
 	for _, n := range []int{2, 4, 8, 16, 32, 64, 128, 256, 512, 1024} {
 		b.Run(fmt.Sprintf("%d shards", n), func(b *testing.B) {
-			c := NewSharded(n, NewDefaultHasher32())
+			c := NewSharded[string, int](n, DefaultStringHasher64{})
 
 			b.ReportAllocs()
 			b.ResetTimer()
@@ -125,7 +125,7 @@ func BenchmarkSet_Sharded(b *testing.B) {
 func BenchmarkSet_Sharded_Concurrent(b *testing.B) {
 	for _, n := range []int{2, 4, 8, 16, 32, 64, 128, 256, 512, 1024} {
 		b.Run(fmt.Sprintf("%d shards", n), func(b *testing.B) {
-			c := NewSharded(n, NewDefaultHasher32())
+			c := NewSharded[string, int](n, DefaultStringHasher64{})
 
 			b.ReportAllocs()
 			b.ResetTimer()
@@ -140,7 +140,7 @@ func BenchmarkSet_Sharded_Concurrent(b *testing.B) {
 }
 
 func BenchmarkAdd(b *testing.B) {
-	c := New()
+	c := New[string, int]()
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -151,7 +151,7 @@ func BenchmarkAdd(b *testing.B) {
 }
 
 func BenchmarkAdd_Concurrent(b *testing.B) {
-	c := New()
+	c := New[string, int]()
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -166,7 +166,7 @@ func BenchmarkAdd_Concurrent(b *testing.B) {
 func BenchmarkAdd_Sharded(b *testing.B) {
 	for _, n := range []int{2, 4, 8, 16, 32, 64, 128, 256, 512, 1024} {
 		b.Run(fmt.Sprintf("%d shards", n), func(b *testing.B) {
-			c := NewSharded(n, NewDefaultHasher32())
+			c := NewSharded[string, int](n, DefaultStringHasher64{})
 
 			b.ReportAllocs()
 			b.ResetTimer()
@@ -181,7 +181,7 @@ func BenchmarkAdd_Sharded(b *testing.B) {
 func BenchmarkAdd_Sharded_Concurrent(b *testing.B) {
 	for _, n := range []int{2, 4, 8, 16, 32, 64, 128, 256, 512, 1024} {
 		b.Run(fmt.Sprintf("%d shards", n), func(b *testing.B) {
-			c := NewSharded(n, NewDefaultHasher32())
+			c := NewSharded[string, int](n, DefaultStringHasher64{})
 
 			b.ReportAllocs()
 			b.ResetTimer()
@@ -196,7 +196,7 @@ func BenchmarkAdd_Sharded_Concurrent(b *testing.B) {
 }
 
 func BenchmarkReplace(b *testing.B) {
-	c := New()
+	c := New[string, int]()
 	for i := 0; i < b.N; i++ {
 		c.Set(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
 	}
@@ -212,7 +212,7 @@ func BenchmarkReplace(b *testing.B) {
 }
 
 func BenchmarkRemove(b *testing.B) {
-	c := New()
+	c := New[string, int]()
 	for i := 0; i < b.N; i++ {
 		c.Set(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
 	}

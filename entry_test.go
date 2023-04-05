@@ -8,24 +8,24 @@ import (
 func TestEntry_HasExpired(t *testing.T) {
 	tests := []struct {
 		name  string
-		entry entry
+		entry entry[string]
 		now   time.Time
 		want  bool
 	}{
 		{
 			name:  "no expiration",
-			entry: entry{val: "foo", expiration: noexpiration},
+			entry: entry[string]{val: "foo", exp: expiration{date: noExp}},
 			now:   time.Now(),
 		},
 		{
 			name:  "expired",
-			entry: entry{val: "foo", expiration: time.Now().Add(-time.Second).UnixNano()},
+			entry: entry[string]{val: "foo", exp: expiration{date: time.Now().Add(-time.Second).UnixNano()}},
 			now:   time.Now(),
 			want:  true,
 		},
 		{
 			name:  "not expired",
-			entry: entry{val: "foo", expiration: time.Now().Add(time.Second).UnixNano()},
+			entry: entry[string]{val: "foo", exp: expiration{date: time.Now().Add(time.Second).UnixNano()}},
 			now:   time.Now(),
 		},
 	}
@@ -41,21 +41,21 @@ func TestEntry_HasExpired(t *testing.T) {
 func TestEntry_HasNoExpiration(t *testing.T) {
 	tests := []struct {
 		name  string
-		entry entry
+		entry entry[string]
 		want  bool
 	}{
 		{
 			name:  "no expiration",
-			entry: entry{val: "foo", expiration: noexpiration},
+			entry: entry[string]{val: "foo", exp: expiration{date: noExp}},
 			want:  true,
 		},
 		{
 			name:  "expired",
-			entry: entry{val: "foo", expiration: time.Now().Add(-time.Second).UnixNano()},
+			entry: entry[string]{val: "foo", exp: expiration{date: time.Now().Add(-time.Second).UnixNano()}},
 		},
 		{
 			name:  "not expired",
-			entry: entry{val: "foo", expiration: time.Now().Add(time.Second).UnixNano()},
+			entry: entry[string]{val: "foo", exp: expiration{date: time.Now().Add(time.Second).UnixNano()}},
 		},
 	}
 	for _, tt := range tests {
@@ -70,24 +70,24 @@ func TestEntry_HasNoExpiration(t *testing.T) {
 func TestEntry_HasDefaultExpiration(t *testing.T) {
 	tests := []struct {
 		name  string
-		entry entry
+		entry entry[string]
 		want  bool
 	}{
 		{
 			name:  "no expiration",
-			entry: entry{val: "foo", expiration: noexpiration},
+			entry: entry[string]{val: "foo", exp: expiration{date: noExp}},
 		},
 		{
 			name:  "expired",
-			entry: entry{val: "foo", expiration: time.Now().Add(-time.Second).UnixNano()},
+			entry: entry[string]{val: "foo", exp: expiration{date: time.Now().Add(-time.Second).UnixNano()}},
 		},
 		{
 			name:  "not expired",
-			entry: entry{val: "foo", expiration: time.Now().Add(time.Second).UnixNano()},
+			entry: entry[string]{val: "foo", exp: expiration{date: time.Now().Add(time.Second).UnixNano()}},
 		},
 		{
 			name:  "default expiration",
-			entry: entry{val: "foo", expiration: defaultexp},
+			entry: entry[string]{val: "foo", exp: expiration{date: defaultExp}},
 			want:  true,
 		},
 	}
@@ -103,20 +103,20 @@ func TestEntry_HasDefaultExpiration(t *testing.T) {
 func TestEntry_HasSlidingExpiration(t *testing.T) {
 	tests := []struct {
 		name  string
-		entry entry
+		entry entry[string]
 		want  bool
 	}{
 		{
 			name:  "no expiration",
-			entry: entry{val: "foo", expiration: noexpiration},
+			entry: entry[string]{val: "foo", exp: expiration{date: noExp}},
 		},
 		{
 			name:  "expiration",
-			entry: entry{val: "foo", expiration: time.Now().Add(time.Second).UnixNano()},
+			entry: entry[string]{val: "foo", exp: expiration{date: time.Now().Add(time.Second).UnixNano()}},
 		},
 		{
 			name:  "sliding expiration",
-			entry: entry{val: "foo", expiration: time.Now().Add(time.Second).UnixNano(), sliding: time.Second},
+			entry: entry[string]{val: "foo", exp: expiration{date: time.Now().Add(time.Second).UnixNano(), sliding: time.Second}},
 			want:  true,
 		},
 	}
@@ -133,53 +133,53 @@ func TestEntry_SetDefault(t *testing.T) {
 	now := time.Now()
 	tests := []struct {
 		name    string
-		entry   entry
+		entry   entry[string]
 		now     time.Time
 		d       time.Duration
 		sliding bool
-		want    entry
+		want    entry[string]
 	}{
 		{
 			name:  "no expiration",
-			entry: entry{val: "foo", expiration: noexpiration},
+			entry: entry[string]{val: "foo", exp: expiration{date: noExp}},
 			now:   now,
 			d:     time.Second,
-			want:  entry{val: "foo", expiration: noexpiration},
+			want:  entry[string]{val: "foo", exp: expiration{date: noExp}},
 		},
 		{
 			name:  "expiration",
-			entry: entry{val: "foo", expiration: now.UnixNano()},
+			entry: entry[string]{val: "foo", exp: expiration{date: now.UnixNano()}},
 			now:   now,
 			d:     time.Second,
-			want:  entry{val: "foo", expiration: now.UnixNano()},
+			want:  entry[string]{val: "foo", exp: expiration{date: now.UnixNano()}},
 		},
 		{
 			name:  "default expiration",
-			entry: entry{val: "foo", expiration: defaultexp},
+			entry: entry[string]{val: "foo", exp: expiration{date: defaultExp}},
 			now:   now,
 			d:     time.Second,
-			want:  entry{val: "foo", expiration: now.Add(time.Second).UnixNano()},
+			want:  entry[string]{val: "foo", exp: expiration{date: now.Add(time.Second).UnixNano()}},
 		},
 		{
 			name:    "default sliding expiration",
-			entry:   entry{val: "foo", expiration: defaultexp},
+			entry:   entry[string]{val: "foo", exp: expiration{date: defaultExp}},
 			now:     now,
 			d:       2 * time.Second,
 			sliding: true,
-			want:    entry{val: "foo", expiration: now.Add(2 * time.Second).UnixNano(), sliding: 2 * time.Second},
+			want:    entry[string]{val: "foo", exp: expiration{date: now.Add(2 * time.Second).UnixNano(), sliding: 2 * time.Second}},
 		},
 		{
 			name:  "default no expiration",
-			entry: entry{val: "foo", expiration: defaultexp},
+			entry: entry[string]{val: "foo", exp: expiration{date: defaultExp}},
 			now:   now,
-			d:     noexpiration,
-			want:  entry{val: "foo", expiration: noexpiration},
+			d:     noExp,
+			want:  entry[string]{val: "foo", exp: expiration{date: noExp}},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.entry.SetDefault(tt.now, tt.d, tt.sliding)
-			if tt.entry.expiration != tt.want.expiration || tt.entry.sliding != tt.want.sliding || tt.entry.val != tt.want.val {
+			if tt.entry.exp.date != tt.want.exp.date || tt.entry.exp.sliding != tt.want.exp.sliding || tt.entry.val != tt.want.val {
 				t.Errorf("entry.SetDefault() result %v, want %v", tt.entry, tt.want)
 			}
 		})
@@ -187,11 +187,11 @@ func TestEntry_SetDefault(t *testing.T) {
 }
 
 func TestEntry_SlideExpiration(t *testing.T) {
-	entry := entry{val: "foo", expiration: time.Now().Add(5 * time.Second).UnixNano(), sliding: 5 * time.Second}
+	entry := entry[string]{val: "foo", exp: expiration{date: time.Now().Add(5 * time.Second).UnixNano(), sliding: 5 * time.Second}}
 	<-time.After(2 * time.Second)
 	now := time.Now()
 	entry.SlideExpiration(now)
-	if want := now.Add(5 * time.Second).UnixNano(); entry.expiration != want {
-		t.Errorf("entry.SlideExpiration() results in expiration %v, want %v", entry.expiration, want)
+	if want := now.Add(5 * time.Second).UnixNano(); entry.exp.date != want {
+		t.Errorf("entry.SlideExpiration() results in expiration %v, want %v", entry.exp.date, want)
 	}
 }

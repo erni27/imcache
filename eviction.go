@@ -13,4 +13,4 @@ const (
 )
 
 // EvictionCallback is the callback function that is called when an entry is evicted.
-type EvictionCallback func(key string, val interface{}, reason EvictionReason)
+type EvictionCallback[K comparable, V any] func(key K, val V, reason EvictionReason)

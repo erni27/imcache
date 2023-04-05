@@ -6,9 +6,9 @@
 [![GoDoc](https://pkg.go.dev/badge/mod/github.com/erni27/imcache)](https://pkg.go.dev/mod/github.com/erni27/imcache)
 [![Coverage Status](https://codecov.io/gh/erni27/imcache/branch/master/graph/badge.svg)](https://codecov.io/gh/erni27/imcache)
 
-`imcache` is a simple thread-safe in-memory cache Go library.
+`imcache` is a generic in-memory cache Go library.
 
-It supports expiration, sliding expiration, eviction callbacks and sharding.
+It supports expiration, sliding expiration, eviction callbacks and sharding. It's safe for concurrent use by multiple goroutines.
 
 ```Go
 import "github.com/erni27/imcache"

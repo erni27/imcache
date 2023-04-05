@@ -3,34 +3,35 @@ package imcache
 import "time"
 
 // Option is a Cache option.
-type Option interface {
-	apply(*shard)
+type Option[K comparable, V any] interface {
+	apply(*shard[K, V])
 }
 
-type optionf func(*shard)
+type optionf[K comparable, V any] func(*shard[K, V])
 
-func (f optionf) apply(c *shard) {
+//lint:ignore U1000 false positive
+func (f optionf[K, V]) apply(c *shard[K, V]) {
 	f(c)
 }
 
 // WithEvictionCallbackOption returns an Option that sets the eviction callback.
-func WithEvictionCallbackOption(f EvictionCallback) Option {
-	return optionf(func(c *shard) {
-		c.evictionc = f
+func WithEvictionCallbackOption[K comparable, V any](f EvictionCallback[K, V]) Option[K, V] {
+	return optionf[K, V](func(s *shard[K, V]) {
+		s.onEviction = f
 	})
 }
 
 // WithDefaultExpirationOption returns an Option that sets the default expiration.
-func WithDefaultExpirationOption(d time.Duration) Option {
-	return optionf(func(c *shard) {
-		c.defaultexp = d
+func WithDefaultExpirationOption[K comparable, V any](d time.Duration) Option[K, V] {
+	return optionf[K, V](func(s *shard[K, V]) {
+		s.defaultExp = d
 	})
 }
 
 // WithDefaultSlidingExpirationOption returns an Option that sets the default sliding expiration.
-func WithDefaultSlidingExpirationOption(d time.Duration) Option {
-	return optionf(func(c *shard) {
-		c.defaultexp = d
-		c.sliding = true
+func WithDefaultSlidingExpirationOption[K comparable, V any](d time.Duration) Option[K, V] {
+	return optionf[K, V](func(s *shard[K, V]) {
+		s.defaultExp = d
+		s.sliding = true
 	})
 }

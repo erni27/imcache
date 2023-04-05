@@ -5,178 +5,180 @@ import (
 	"time"
 )
 
-func newShard(opts ...Option) *shard {
-	c := &shard{
-		m:          make(map[string]entry),
-		defaultexp: -1,
+func newShard[K comparable, V any](opts ...Option[K, V]) *shard[K, V] {
+	s := &shard[K, V]{
+		m:          make(map[K]entry[V]),
+		defaultExp: -1,
 	}
 	for _, opt := range opts {
-		opt.apply(c)
+		opt.apply(s)
 	}
-	return c
+	return s
 }
 
-type shard struct {
+type shard[K comparable, V any] struct {
 	mu sync.Mutex
 
-	m map[string]entry
+	m map[K]entry[V]
 
-	defaultexp time.Duration
+	defaultExp time.Duration
 	sliding    bool
 
-	evictionc EvictionCallback
+	onEviction EvictionCallback[K, V]
 }
 
-func (c *shard) Get(key string) (interface{}, error) {
+func (s *shard[K, V]) Get(key K) (V, error) {
+	var empty V
 	now := time.Now()
-	c.mu.Lock()
-	entry, ok := c.m[key]
+	s.mu.Lock()
+	entry, ok := s.m[key]
 	if !ok {
-		c.mu.Unlock()
-		return nil, ErrNotFound
+		s.mu.Unlock()
+		return empty, ErrNotFound
 	}
 	if entry.HasExpired(now) {
-		delete(c.m, key)
-		c.mu.Unlock()
-		if c.evictionc != nil {
-			c.evictionc(key, entry.val, EvictionReasonExpired)
+		delete(s.m, key)
+		s.mu.Unlock()
+		if s.onEviction != nil {
+			s.onEviction(key, entry.val, EvictionReasonExpired)
 		}
-		return nil, ErrNotFound
+		return empty, ErrNotFound
 	}
 	if entry.HasSlidingExpiration() {
 		entry.SlideExpiration(now)
-		c.m[key] = entry
+		s.m[key] = entry
 	}
-	c.mu.Unlock()
+	s.mu.Unlock()
 	return entry.val, nil
 }
 
-func (c *shard) Set(key string, val interface{}, exp Expiration) {
+func (s *shard[K, V]) Set(key K, val V, exp Expiration) {
 	now := time.Now()
-	entry := entry{val: val}
-	exp.apply(&entry)
-	entry.SetDefault(now, c.defaultexp, c.sliding)
-	c.mu.Lock()
-	current, ok := c.m[key]
-	c.m[key] = entry
-	c.mu.Unlock()
-	if ok && c.evictionc != nil {
+	entry := entry[V]{val: val}
+	exp.apply(&entry.exp)
+	entry.SetDefault(now, s.defaultExp, s.sliding)
+	s.mu.Lock()
+	current, ok := s.m[key]
+	s.m[key] = entry
+	s.mu.Unlock()
+	if ok && s.onEviction != nil {
 		if current.HasExpired(now) {
-			c.evictionc(key, current.val, EvictionReasonExpired)
+			s.onEviction(key, current.val, EvictionReasonExpired)
 		} else {
-			c.evictionc(key, current.val, EvictionReasonReplaced)
+			s.onEviction(key, current.val, EvictionReasonReplaced)
 		}
 	}
 }
 
-func (c *shard) Add(key string, val interface{}, exp Expiration) error {
+func (s *shard[K, V]) Add(key K, val V, exp Expiration) error {
 	now := time.Now()
-	entry := entry{val: val}
-	exp.apply(&entry)
-	entry.SetDefault(now, c.defaultexp, c.sliding)
-	c.mu.Lock()
-	current, ok := c.m[key]
+	entry := entry[V]{val: val}
+	exp.apply(&entry.exp)
+	entry.SetDefault(now, s.defaultExp, s.sliding)
+	s.mu.Lock()
+	current, ok := s.m[key]
 	if ok && !current.HasExpired(now) {
-		c.mu.Unlock()
+		s.mu.Unlock()
 		return ErrAlreadyExists
 	}
-	c.m[key] = entry
-	c.mu.Unlock()
-	if ok && c.evictionc != nil {
-		c.evictionc(key, current.val, EvictionReasonExpired)
+	s.m[key] = entry
+	s.mu.Unlock()
+	if ok && s.onEviction != nil {
+		s.onEviction(key, current.val, EvictionReasonExpired)
 	}
 	return nil
 }
 
-func (c *shard) Replace(key string, val interface{}, exp Expiration) error {
+func (s *shard[K, V]) Replace(key K, val V, exp Expiration) error {
 	now := time.Now()
-	entry := entry{val: val}
-	exp.apply(&entry)
-	entry.SetDefault(now, c.defaultexp, c.sliding)
-	c.mu.Lock()
-	current, ok := c.m[key]
+	entry := entry[V]{val: val}
+	exp.apply(&entry.exp)
+	entry.SetDefault(now, s.defaultExp, s.sliding)
+	s.mu.Lock()
+	current, ok := s.m[key]
 	if !ok {
-		c.mu.Unlock()
+		s.mu.Unlock()
 		return ErrNotFound
 	}
 	if current.HasExpired(now) {
-		delete(c.m, key)
-		c.mu.Unlock()
-		if c.evictionc != nil {
-			c.evictionc(key, current.val, EvictionReasonExpired)
+		delete(s.m, key)
+		s.mu.Unlock()
+		if s.onEviction != nil {
+			s.onEviction(key, current.val, EvictionReasonExpired)
 		}
 		return ErrNotFound
 	}
-	c.m[key] = entry
-	c.mu.Unlock()
-	if c.evictionc != nil {
-		c.evictionc(key, current.val, EvictionReasonReplaced)
+	s.m[key] = entry
+	s.mu.Unlock()
+	if s.onEviction != nil {
+		s.onEviction(key, current.val, EvictionReasonReplaced)
 	}
 	return nil
 }
 
-func (c *shard) Remove(key string) error {
-	c.mu.Lock()
-	entry, ok := c.m[key]
+func (s *shard[K, V]) Remove(key K) error {
+	s.mu.Lock()
+	entry, ok := s.m[key]
 	if !ok {
-		c.mu.Unlock()
+		s.mu.Unlock()
 		return ErrNotFound
 	}
-	delete(c.m, key)
-	c.mu.Unlock()
+	delete(s.m, key)
+	s.mu.Unlock()
 	if entry.HasExpired(time.Now()) {
-		if c.evictionc != nil {
-			c.evictionc(key, entry.val, EvictionReasonExpired)
+		if s.onEviction != nil {
+			s.onEviction(key, entry.val, EvictionReasonExpired)
 		}
 		return ErrNotFound
 	}
-	if c.evictionc != nil {
-		c.evictionc(key, entry.val, EvictionReasonRemoved)
+	if s.onEviction != nil {
+		s.onEviction(key, entry.val, EvictionReasonRemoved)
 	}
 	return nil
 }
 
-func (c *shard) RemoveAll() {
-	c.mu.Lock()
-	removed := c.m
-	c.m = make(map[string]entry)
-	c.mu.Unlock()
-	if c.evictionc != nil {
+func (s *shard[K, V]) RemoveAll() {
+	s.mu.Lock()
+	removed := s.m
+	s.m = make(map[K]entry[V])
+	s.mu.Unlock()
+	if s.onEviction != nil {
 		for key, entry := range removed {
 			if entry.HasExpired(time.Now()) {
-				c.evictionc(key, entry.val, EvictionReasonExpired)
+				s.onEviction(key, entry.val, EvictionReasonExpired)
 			} else {
-				c.evictionc(key, entry.val, EvictionReasonRemoved)
+				s.onEviction(key, entry.val, EvictionReasonRemoved)
 			}
 		}
 	}
 }
 
-func (c *shard) RemoveStale() {
+type kv[K comparable, V any] struct {
+	key K
+	val V
+}
+
+func (s *shard[K, V]) RemoveStale() {
 	now := time.Now()
-	c.mu.Lock()
-	if c.evictionc == nil {
-		for key, entry := range c.m {
+	s.mu.Lock()
+	if s.onEviction == nil {
+		for key, entry := range s.m {
 			if entry.HasExpired(now) {
-				delete(c.m, key)
+				delete(s.m, key)
 			}
 		}
-		c.mu.Unlock()
+		s.mu.Unlock()
 		return
 	}
-	type kv struct {
-		key string
-		val interface{}
-	}
-	var removed []kv
-	for key, entry := range c.m {
+	var removed []kv[K, V]
+	for key, entry := range s.m {
 		if entry.HasExpired(now) {
-			removed = append(removed, kv{key, entry.val})
-			delete(c.m, key)
+			removed = append(removed, kv[K, V]{key, entry.val})
+			delete(s.m, key)
 		}
 	}
-	c.mu.Unlock()
+	s.mu.Unlock()
 	for _, kv := range removed {
-		c.evictionc(kv.key, kv.val, EvictionReasonExpired)
+		s.onEviction(kv.key, kv.val, EvictionReasonExpired)
 	}
 }

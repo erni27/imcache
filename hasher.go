@@ -4,21 +4,18 @@ import (
 	"hash/fnv"
 )
 
-// Hasher32 is the interface that wraps the Sum32 method.
-type Hasher32 interface {
-	// Sum32 returns the 32-bit hash of input string.
-	Sum32(string) uint32
+// Hasher64 is the interface that wraps the Sum64 method.
+type Hasher64[K comparable] interface {
+	// Sum64 returns the 64-bit hash of the input key.
+	Sum64(K) uint64
 }
 
-// NewDefaultHasher32 returns a new Hasher32 that uses the FNV-1a algorithm.
-func NewDefaultHasher32() Hasher32 {
-	return fnv32a{}
-}
+// DefaultStringHasher64 is the default hasher for string keys.
+// It uses the FNV-1a hash function.
+type DefaultStringHasher64 struct{}
 
-type fnv32a struct{}
-
-func (fnv32a) Sum32(s string) uint32 {
-	h := fnv.New32a()
-	h.Write([]byte(s))
-	return h.Sum32()
+func (DefaultStringHasher64) Sum64(key string) uint64 {
+	hash := fnv.New64a()
+	_, _ = hash.Write([]byte(key))
+	return hash.Sum64()
 }

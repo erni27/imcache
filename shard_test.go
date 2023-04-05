@@ -11,15 +11,15 @@ import (
 func TestShard_Get(t *testing.T) {
 	tests := []struct {
 		name    string
-		s       func() *shard
+		s       func() *shard[string, string]
 		key     string
-		want    interface{}
+		want    string
 		wantErr error
 	}{
 		{
 			name: "success",
-			s: func() *shard {
-				c := newShard()
+			s: func() *shard[string, string] {
+				c := newShard[string, string]()
 				c.Set("foo", "bar", WithNoExpiration())
 				return c
 			},
@@ -28,8 +28,8 @@ func TestShard_Get(t *testing.T) {
 		},
 		{
 			name: "not found",
-			s: func() *shard {
-				c := newShard()
+			s: func() *shard[string, string] {
+				c := newShard[string, string]()
 				return c
 			},
 			key:     "foo",
@@ -37,8 +37,8 @@ func TestShard_Get(t *testing.T) {
 		},
 		{
 			name: "entry expired",
-			s: func() *shard {
-				c := newShard()
+			s: func() *shard[string, string] {
+				c := newShard[string, string]()
 				c.Set("foo", "bar", WithExpiration(time.Nanosecond))
 				<-time.After(time.Nanosecond)
 				return c
@@ -65,14 +65,14 @@ func TestShard_Get(t *testing.T) {
 func TestShard_Set(t *testing.T) {
 	tests := []struct {
 		name string
-		s    func() *shard
+		s    func() *shard[string, string]
 		key  string
-		val  interface{}
+		val  string
 	}{
 		{
 			name: "add new entry",
-			s: func() *shard {
-				c := newShard()
+			s: func() *shard[string, string] {
+				c := newShard[string, string]()
 				return c
 			},
 			key: "foo",
@@ -80,8 +80,8 @@ func TestShard_Set(t *testing.T) {
 		},
 		{
 			name: "replace existing entry",
-			s: func() *shard {
-				c := newShard()
+			s: func() *shard[string, string] {
+				c := newShard[string, string]()
 				c.Set("foo", "foo", WithNoExpiration())
 				return c
 			},
@@ -90,8 +90,8 @@ func TestShard_Set(t *testing.T) {
 		},
 		{
 			name: "add new entry if old expired",
-			s: func() *shard {
-				c := newShard()
+			s: func() *shard[string, string] {
+				c := newShard[string, string]()
 				c.Set("foo", "foo", WithExpiration(time.Nanosecond))
 				<-time.After(time.Nanosecond)
 				return c
@@ -119,15 +119,15 @@ func TestShard_Set(t *testing.T) {
 func TestShard_Add(t *testing.T) {
 	tests := []struct {
 		name    string
-		s       func() *shard
+		s       func() *shard[string, string]
 		key     string
-		val     interface{}
+		val     string
 		wantErr error
 	}{
 		{
 			name: "add new entry",
-			s: func() *shard {
-				c := newShard()
+			s: func() *shard[string, string] {
+				c := newShard[string, string]()
 				return c
 			},
 			key: "foo",
@@ -135,8 +135,8 @@ func TestShard_Add(t *testing.T) {
 		},
 		{
 			name: "add new entry if old expired",
-			s: func() *shard {
-				c := newShard()
+			s: func() *shard[string, string] {
+				c := newShard[string, string]()
 				c.Set("foo", "foo", WithExpiration(time.Nanosecond))
 				<-time.After(time.Nanosecond)
 				return c
@@ -146,8 +146,8 @@ func TestShard_Add(t *testing.T) {
 		},
 		{
 			name: "replace existing entry",
-			s: func() *shard {
-				c := newShard()
+			s: func() *shard[string, string] {
+				c := newShard[string, string]()
 				c.Set("foo", "foo", WithNoExpiration())
 				return c
 			},
@@ -180,15 +180,15 @@ func TestShard_Add(t *testing.T) {
 func TestShard_Replace(t *testing.T) {
 	tests := []struct {
 		name    string
-		s       func() *shard
+		s       func() *shard[string, string]
 		key     string
-		val     interface{}
+		val     string
 		wantErr error
 	}{
 		{
 			name: "success",
-			s: func() *shard {
-				c := newShard()
+			s: func() *shard[string, string] {
+				c := newShard[string, string]()
 				c.Set("foo", "foo", WithNoExpiration())
 				return c
 			},
@@ -197,8 +197,8 @@ func TestShard_Replace(t *testing.T) {
 		},
 		{
 			name: "entry expired",
-			s: func() *shard {
-				c := newShard()
+			s: func() *shard[string, string] {
+				c := newShard[string, string]()
 				c.Set("foo", "foo", WithExpiration(time.Nanosecond))
 				<-time.After(time.Nanosecond)
 				return c
@@ -209,8 +209,8 @@ func TestShard_Replace(t *testing.T) {
 		},
 		{
 			name: "entry doesn't exist",
-			s: func() *shard {
-				c := newShard()
+			s: func() *shard[string, string] {
+				c := newShard[string, string]()
 				return c
 			},
 			key:     "foo",
@@ -242,14 +242,14 @@ func TestShard_Replace(t *testing.T) {
 func TestShard_Remove(t *testing.T) {
 	tests := []struct {
 		name    string
-		s       func() *shard
+		s       func() *shard[string, string]
 		key     string
 		wantErr error
 	}{
 		{
 			name: "success",
-			s: func() *shard {
-				c := newShard()
+			s: func() *shard[string, string] {
+				c := newShard[string, string]()
 				c.Set("foo", "foo", WithNoExpiration())
 				return c
 			},
@@ -257,8 +257,8 @@ func TestShard_Remove(t *testing.T) {
 		},
 		{
 			name: "entry doesn't exist",
-			s: func() *shard {
-				c := newShard()
+			s: func() *shard[string, string] {
+				c := newShard[string, string]()
 				c.Set("foo", "foo", WithNoExpiration())
 				return c
 			},
@@ -267,8 +267,8 @@ func TestShard_Remove(t *testing.T) {
 		},
 		{
 			name: "entry expired",
-			s: func() *shard {
-				c := newShard()
+			s: func() *shard[string, string] {
+				c := newShard[string, string]()
 				c.Set("foo", "foo", WithExpiration(time.Nanosecond))
 				<-time.After(time.Nanosecond)
 				return c
@@ -292,7 +292,7 @@ func TestShard_Remove(t *testing.T) {
 }
 
 func TestShard_RemoveAll(t *testing.T) {
-	s := newShard()
+	s := newShard[string, string]()
 	if err := s.Add("foo", "foo", WithNoExpiration()); err != nil {
 		t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
 	}
@@ -310,7 +310,7 @@ func TestShard_RemoveAll(t *testing.T) {
 }
 
 func TestShard_RemoveStale(t *testing.T) {
-	s := newShard()
+	s := newShard[string, string]()
 	if err := s.Add("foo", "foo", WithNoExpiration()); err != nil {
 		t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
 	}
@@ -328,7 +328,7 @@ func TestShard_RemoveStale(t *testing.T) {
 }
 
 func TestShard_DefaultExpiration(t *testing.T) {
-	s := newShard(WithDefaultExpirationOption(500 * time.Millisecond))
+	s := newShard(WithDefaultExpirationOption[string, string](500 * time.Millisecond))
 	if err := s.Add("foo", "foo", WithDefaultExpiration()); err != nil {
 		t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
 	}
@@ -339,7 +339,7 @@ func TestShard_DefaultExpiration(t *testing.T) {
 }
 
 func TestShard_DefaultSlidingExpiration(t *testing.T) {
-	s := newShard(WithDefaultSlidingExpirationOption(500 * time.Millisecond))
+	s := newShard(WithDefaultSlidingExpirationOption[string, string](500 * time.Millisecond))
 	if err := s.Add("foo", "foo", WithDefaultExpiration()); err != nil {
 		t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
 	}
@@ -358,7 +358,7 @@ func TestShard_DefaultSlidingExpiration(t *testing.T) {
 }
 
 func TestShard_Get_SlidingExpiration(t *testing.T) {
-	s := newShard()
+	s := newShard[string, string]()
 	if err := s.Add("foo", "foo", WithSlidingExpiration(500*time.Millisecond)); err != nil {
 		t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
 	}
