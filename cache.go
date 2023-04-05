@@ -12,9 +12,9 @@ import (
 )
 
 var (
-	// ErrNotFound is returned when an entry is not found in the cache.
+	// ErrNotFound is returned when an entry for a given key is not found in the cache.
 	ErrNotFound = errors.New("imcache: not found")
-	// ErrAlreadyExists is returned when an entry already exists in the cache.
+	// ErrAlreadyExists is returned when an entry for a given key already exists in the cache.
 	ErrAlreadyExists = errors.New("imcache: already exists")
 )
 
