@@ -13,20 +13,6 @@ func newShard[K comparable, V any](opts ...Option[K, V]) *shard[K, V] {
 	for _, opt := range opts {
 		opt.apply(s)
 	}
-	if s.cleanerInterval > 0 {
-		go func() {
-			ticker := time.NewTicker(s.cleanerInterval)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					s.RemoveStale()
-				case <-s.cleanerStop:
-					return
-				}
-			}
-		}()
-	}
 	return s
 }
 
@@ -39,10 +25,6 @@ type shard[K comparable, V any] struct {
 	sliding    bool
 
 	onEviction EvictionCallback[K, V]
-
-	cleaner         bool
-	cleanerInterval time.Duration
-	cleanerStop     chan struct{}
 }
 
 func (s *shard[K, V]) Get(key K) (V, error) {

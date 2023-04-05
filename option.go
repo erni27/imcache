@@ -35,14 +35,3 @@ func WithDefaultSlidingExpirationOption[K comparable, V any](d time.Duration) Op
 		s.sliding = true
 	})
 }
-
-// WithCleanerOption returns an Option that turns on the cleaner.
-// The cleaner removes stale entries periodically from the cache.
-// It spawns a goroutine per shard.
-func WithCleanerOption[K comparable, V any](d time.Duration) Option[K, V] {
-	return optionf[K, V](func(s *shard[K, V]) {
-		s.cleaner = true
-		s.cleanerInterval = d
-		s.cleanerStop = make(chan struct{})
-	})
-}
