@@ -12,5 +12,18 @@ const (
 	EvictionReasonReplaced
 )
 
+func (r EvictionReason) String() string {
+	switch r {
+	case EvictionReasonExpired:
+		return "expired"
+	case EvictionReasonRemoved:
+		return "removed"
+	case EvictionReasonReplaced:
+		return "replaced"
+	default:
+		return "unknown"
+	}
+}
+
 // EvictionCallback is the callback function that is called when an entry is evicted.
 type EvictionCallback[K comparable, V any] func(key K, val V, reason EvictionReason)

@@ -14,21 +14,21 @@ func (f optionf[K, V]) apply(c *shard[K, V]) {
 	f(c)
 }
 
-// WithEvictionCallbackOption returns an Option that sets the eviction callback.
+// WithEvictionCallbackOption returns an Option that sets the Cache eviction callback.
 func WithEvictionCallbackOption[K comparable, V any](f EvictionCallback[K, V]) Option[K, V] {
 	return optionf[K, V](func(s *shard[K, V]) {
 		s.onEviction = f
 	})
 }
 
-// WithDefaultExpirationOption returns an Option that sets the default expiration.
+// WithDefaultExpirationOption returns an Option that sets the Cache default expiration.
 func WithDefaultExpirationOption[K comparable, V any](d time.Duration) Option[K, V] {
 	return optionf[K, V](func(s *shard[K, V]) {
 		s.defaultExp = d
 	})
 }
 
-// WithDefaultSlidingExpirationOption returns an Option that sets the default sliding expiration.
+// WithDefaultSlidingExpirationOption returns an Option that sets the Cache default sliding expiration.
 func WithDefaultSlidingExpirationOption[K comparable, V any](d time.Duration) Option[K, V] {
 	return optionf[K, V](func(s *shard[K, V]) {
 		s.defaultExp = d
