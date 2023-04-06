@@ -2,11 +2,17 @@ package imcache
 
 import (
 	"errors"
+	"math/rand"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
 )
+
+func init() {
+	rand.Seed(time.Now().UnixNano())
+}
 
 func TestCache_Get(t *testing.T) {
 	tests := []struct {
@@ -92,7 +98,7 @@ func TestCache_Get(t *testing.T) {
 	}
 }
 
-func TestShard_Get_SlidingExpiration(t *testing.T) {
+func TestCache_Get_SlidingExpiration(t *testing.T) {
 	tests := []struct {
 		name string
 		c    Cache[string, string]
@@ -305,7 +311,7 @@ func TestCache_Add(t *testing.T) {
 	}
 }
 
-func TestShard_Replace(t *testing.T) {
+func TestCache_Replace(t *testing.T) {
 	tests := []struct {
 		name    string
 		c       func() Cache[string, string]
@@ -399,7 +405,7 @@ func TestShard_Replace(t *testing.T) {
 	}
 }
 
-func TestShard_Remove(t *testing.T) {
+func TestCache_Remove(t *testing.T) {
 	tests := []struct {
 		name    string
 		c       func() Cache[string, string]
@@ -481,7 +487,7 @@ func TestShard_Remove(t *testing.T) {
 	}
 }
 
-func TestShard_RemoveAll(t *testing.T) {
+func TestCache_RemoveAll(t *testing.T) {
 	tests := []struct {
 		name string
 		c    Cache[string, string]
@@ -517,7 +523,7 @@ func TestShard_RemoveAll(t *testing.T) {
 	}
 }
 
-func TestShard_RemoveStale(t *testing.T) {
+func TestCache_RemoveStale(t *testing.T) {
 	tests := []struct {
 		name string
 		c    Cache[string, string]
@@ -553,7 +559,38 @@ func TestShard_RemoveStale(t *testing.T) {
 	}
 }
 
-func TestShard_DefaultExpiration(t *testing.T) {
+func TestCache_Len(t *testing.T) {
+	tests := []struct {
+		name string
+		c    Cache[string, int]
+	}{
+		{
+			name: "not sharded",
+			c:    New[string, int](),
+		},
+		{
+			name: "sharded",
+			c:    NewSharded[string, int](8, DefaultStringHasher64{}),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := tt.c
+			n := 1000 + rand.Intn(1000)
+			for i := 0; i < n; i++ {
+				if err := c.Add(strconv.Itoa(i), i, WithNoExpiration()); err != nil {
+					t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", strconv.Itoa(i), err)
+				}
+			}
+			if got := c.Len(); got != n {
+				t.Errorf("Cache.Len() = %d, want %d", got, n)
+			}
+		})
+	}
+}
+
+func TestCache_DefaultExpiration(t *testing.T) {
 	tests := []struct {
 		name string
 		c    Cache[string, string]
@@ -582,7 +619,7 @@ func TestShard_DefaultExpiration(t *testing.T) {
 	}
 }
 
-func TestShard_DefaultSlidingExpiration(t *testing.T) {
+func TestCache_DefaultSlidingExpiration(t *testing.T) {
 	tests := []struct {
 		name string
 		c    Cache[string, string]
@@ -657,7 +694,7 @@ func (m *evictionCallbackMock) Reset() {
 	m.calls = nil
 }
 
-func TestShard_Get_EvictionCallback(t *testing.T) {
+func TestCache_Get_EvictionCallback(t *testing.T) {
 	evictioncMock := &evictionCallbackMock{}
 
 	tests := []struct {
@@ -692,7 +729,7 @@ func TestShard_Get_EvictionCallback(t *testing.T) {
 	}
 }
 
-func TestShard_Set_EvictionCallback(t *testing.T) {
+func TestCache_Set_EvictionCallback(t *testing.T) {
 	evictioncMock := &evictionCallbackMock{}
 
 	tests := []struct {
@@ -732,7 +769,7 @@ func TestShard_Set_EvictionCallback(t *testing.T) {
 	}
 }
 
-func TestShard_Add_EvictionCallback(t *testing.T) {
+func TestCache_Add_EvictionCallback(t *testing.T) {
 	evictioncMock := &evictionCallbackMock{}
 
 	tests := []struct {
@@ -767,7 +804,7 @@ func TestShard_Add_EvictionCallback(t *testing.T) {
 	}
 }
 
-func TestShard_Replace_EvictionCallback(t *testing.T) {
+func TestCache_Replace_EvictionCallback(t *testing.T) {
 	evictioncMock := &evictionCallbackMock{}
 
 	tests := []struct {
@@ -811,7 +848,7 @@ func TestShard_Replace_EvictionCallback(t *testing.T) {
 	}
 }
 
-func TestShard_Remove_EvictionCallback(t *testing.T) {
+func TestCache_Remove_EvictionCallback(t *testing.T) {
 	evictioncMock := &evictionCallbackMock{}
 
 	tests := []struct {
@@ -855,7 +892,7 @@ func TestShard_Remove_EvictionCallback(t *testing.T) {
 	}
 }
 
-func TestShard_RemoveAll_EvictionCallback(t *testing.T) {
+func TestCache_RemoveAll_EvictionCallback(t *testing.T) {
 	evictioncMock := &evictionCallbackMock{}
 
 	tests := []struct {
@@ -894,22 +931,42 @@ func TestShard_RemoveAll_EvictionCallback(t *testing.T) {
 	}
 }
 
-func TestShard_RemoveStale_EvictionCallback(t *testing.T) {
+func TestCache_RemoveStale_EvictionCallback(t *testing.T) {
 	evictioncMock := &evictionCallbackMock{}
-	s := New(WithEvictionCallbackOption(evictioncMock.Callback))
-	if err := s.Add("foo", "foo", WithExpiration(time.Nanosecond)); err != nil {
-		t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
+
+	tests := []struct {
+		name string
+		c    Cache[string, interface{}]
+	}{
+		{
+			name: "not sharded",
+			c:    New(WithEvictionCallbackOption(evictioncMock.Callback)),
+		},
+		{
+			name: "sharded",
+			c:    NewSharded[string](8, DefaultStringHasher64{}, WithEvictionCallbackOption(evictioncMock.Callback)),
+		},
 	}
-	if err := s.Add("bar", "bar", WithNoExpiration()); err != nil {
-		t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "bar", err)
-	}
-	<-time.After(time.Nanosecond)
-	s.RemoveStale()
-	if _, err := s.Get("foo"); !errors.Is(err, ErrNotFound) {
-		t.Errorf("Cache.Get(%s) = _, %v, want _, %v", "foo", err, ErrNotFound)
-	}
-	if !evictioncMock.HasBeenCalledWith("foo", "foo", EvictionReasonExpired) {
-		t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "foo", "foo", EvictionReasonExpired)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer evictioncMock.Reset()
+			c := New(WithEvictionCallbackOption(evictioncMock.Callback))
+			if err := c.Add("foo", "foo", WithExpiration(time.Nanosecond)); err != nil {
+				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
+			}
+			if err := c.Add("bar", "bar", WithNoExpiration()); err != nil {
+				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "bar", err)
+			}
+			<-time.After(time.Nanosecond)
+			c.RemoveStale()
+			if _, err := c.Get("foo"); !errors.Is(err, ErrNotFound) {
+				t.Errorf("Cache.Get(%s) = _, %v, want _, %v", "foo", err, ErrNotFound)
+			}
+			if !evictioncMock.HasBeenCalledWith("foo", "foo", EvictionReasonExpired) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "foo", "foo", EvictionReasonExpired)
+			}
+		})
 	}
 }
 

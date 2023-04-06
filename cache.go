@@ -50,6 +50,8 @@ type Cache[K comparable, V any] interface {
 	// RemoveStale removes all expired entries.
 	// If eviction callback is set, it is called for each removed entry.
 	RemoveStale()
+	// Len returns the number of entries in the cache.
+	Len() int
 }
 
 // New returns a new non-sharded Cache instance.
@@ -129,6 +131,14 @@ func (s *sharded[K, V]) RemoveStale() {
 	for _, shard := range s.shards {
 		shard.RemoveStale()
 	}
+}
+
+func (s *sharded[K, V]) Len() int {
+	var n int
+	for _, shard := range s.shards {
+		n += shard.Len()
+	}
+	return n
 }
 
 func (s *sharded[K, V]) shard(key K) Cache[K, V] {
@@ -300,4 +310,11 @@ func (s *shard[K, V]) RemoveStale() {
 	for _, kv := range removed {
 		s.onEviction(kv.key, kv.val, EvictionReasonExpired)
 	}
+}
+
+func (s *shard[K, V]) Len() int {
+	s.mu.Lock()
+	n := len(s.m)
+	s.mu.Unlock()
+	return n
 }
