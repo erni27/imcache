@@ -559,6 +559,46 @@ func TestCache_RemoveStale(t *testing.T) {
 	}
 }
 
+func TestCache_GetAll(t *testing.T) {
+	tests := []struct {
+		name string
+		c    Cache[string, string]
+	}{
+		{
+			name: "not sharded",
+			c:    New[string, string](),
+		},
+		{
+			name: "sharded",
+			c:    NewSharded[string, string](4, DefaultStringHasher64{}),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := tt.c
+			if err := c.Add("foo", "foo", WithNoExpiration()); err != nil {
+				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
+			}
+			if err := c.Add("foobar", "foobar", WithNoExpiration()); err != nil {
+				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
+			}
+			if err := c.Add("bar", "bar", WithExpiration(time.Nanosecond)); err != nil {
+				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "bar", err)
+			}
+			<-time.After(time.Nanosecond)
+			got := c.GetAll()
+			want := map[string]string{
+				"foo":    "foo",
+				"foobar": "foobar",
+			}
+			if !cmp.Equal(got, want) {
+				t.Errorf("Cache.GetAll() = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
 func TestCache_Len(t *testing.T) {
 	tests := []struct {
 		name string
