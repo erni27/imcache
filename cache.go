@@ -50,6 +50,8 @@ type Cache[K comparable, V any] interface {
 	// RemoveStale removes all expired entries.
 	// If eviction callback is set, it is called for each removed entry.
 	RemoveStale()
+	// GetAll returns a copy of all entries in the cache.
+	GetAll() map[K]V
 	// Len returns the number of entries in the cache.
 	Len() int
 }
@@ -61,83 +63,6 @@ type Cache[K comparable, V any] interface {
 // Option(s) can be used to customize the returned Cache.
 func New[K comparable, V any](opts ...Option[K, V]) Cache[K, V] {
 	return newShard(opts...)
-}
-
-// NewSharded returns a new Cache instance consisting of n shards
-// and sharded by the given Hasher64.
-//
-// By default a returned Cache has no default expiration,
-// no default sliding expiration and no eviction callback.
-// Option(s) can be used to customize the returned Cache.
-func NewSharded[K comparable, V any](n int, hasher Hasher64[K], opts ...Option[K, V]) Cache[K, V] {
-	if n <= 0 {
-		panic("imcache: number of shards must be greater than 0")
-	}
-	if hasher == nil {
-		panic("imcache: hasher must be not nil")
-	}
-	shards := make([]*shard[K, V], n)
-	for i := 0; i < n; i++ {
-		shards[i] = newShard(opts...)
-	}
-	return &sharded[K, V]{
-		shards: shards,
-		hasher: hasher,
-		mask:   uint64(n - 1),
-	}
-}
-
-// sharded is a sharded cache.
-type sharded[K comparable, V any] struct {
-	shards []*shard[K, V]
-	hasher Hasher64[K]
-	mask   uint64
-}
-
-func (s *sharded[K, V]) Get(key K) (V, error) {
-	return s.shard(key).Get(key)
-}
-
-func (s *sharded[K, V]) Set(key K, val V, exp Expiration) {
-	s.shard(key).Set(key, val, exp)
-}
-
-func (s *sharded[K, V]) Add(key K, val V, exp Expiration) error {
-	return s.shard(key).Add(key, val, exp)
-}
-
-func (s *sharded[K, V]) Replace(key K, val V, exp Expiration) error {
-	return s.shard(key).Replace(key, val, exp)
-}
-
-func (s *sharded[K, V]) Remove(key K) error {
-	return s.shard(key).Remove(key)
-}
-
-func (s *sharded[K, V]) RemoveAll() {
-	now := time.Now()
-	for _, shard := range s.shards {
-		shard.removeAll(now)
-	}
-}
-
-func (s *sharded[K, V]) RemoveStale() {
-	now := time.Now()
-	for _, shard := range s.shards {
-		shard.removeStale(now)
-	}
-}
-
-func (s *sharded[K, V]) Len() int {
-	var n int
-	for _, shard := range s.shards {
-		n += shard.Len()
-	}
-	return n
-}
-
-func (s *sharded[K, V]) shard(key K) Cache[K, V] {
-	return s.shards[s.hasher.Sum64(key)&s.mask]
 }
 
 func newShard[K comparable, V any](opts ...Option[K, V]) *shard[K, V] {
@@ -274,10 +199,6 @@ func (s *shard[K, V]) Remove(key K) error {
 	return nil
 }
 
-func (s *shard[K, V]) RemoveAll() {
-	s.removeAll(time.Now())
-}
-
 func (s *shard[K, V]) removeAll(now time.Time) {
 	s.mu.Lock()
 	removed := s.m
@@ -294,12 +215,13 @@ func (s *shard[K, V]) removeAll(now time.Time) {
 	}
 }
 
-func (s *shard[K, V]) RemoveStale() {
-	s.removeStale(time.Now())
+func (s *shard[K, V]) RemoveAll() {
+	s.removeAll(time.Now())
 }
 
 func (s *shard[K, V]) removeStale(now time.Time) {
 	s.mu.Lock()
+	// To avoid copying the expired entries if there's no eviction callback.
 	if s.onEviction == nil {
 		for key, entry := range s.m {
 			if entry.HasExpired(now) {
@@ -322,14 +244,149 @@ func (s *shard[K, V]) removeStale(now time.Time) {
 	}
 }
 
+func (s *shard[K, V]) RemoveStale() {
+	s.removeStale(time.Now())
+}
+
 type kv[K comparable, V any] struct {
 	key K
 	val V
+}
+
+func (s *shard[K, V]) getAll(now time.Time) map[K]V {
+	s.mu.Lock()
+	// To avoid copying the expired entries if there's no eviction callback.
+	if s.onEviction == nil {
+		m := make(map[K]V, len(s.m))
+		for key, entry := range s.m {
+			if entry.HasExpired(now) {
+				delete(s.m, key)
+			} else {
+				m[key] = entry.val
+			}
+		}
+		s.mu.Unlock()
+		return m
+	}
+	var expired []kv[K, V]
+	m := make(map[K]V, len(s.m))
+	for key, entry := range s.m {
+		if entry.HasExpired(now) {
+			expired = append(expired, kv[K, V]{key: key, val: entry.val})
+			delete(s.m, key)
+		} else {
+			m[key] = entry.val
+		}
+	}
+	s.mu.Unlock()
+	for _, kv := range expired {
+		s.onEviction(kv.key, kv.val, EvictionReasonExpired)
+	}
+	return m
+}
+
+func (s *shard[K, V]) GetAll() map[K]V {
+	return s.getAll(time.Now())
 }
 
 func (s *shard[K, V]) Len() int {
 	s.mu.Lock()
 	n := len(s.m)
 	s.mu.Unlock()
+	return n
+}
+
+// NewSharded returns a new Cache instance consisting of n shards
+// and sharded by the given Hasher64.
+//
+// By default a returned Cache has no default expiration,
+// no default sliding expiration and no eviction callback.
+// Option(s) can be used to customize the returned Cache.
+func NewSharded[K comparable, V any](n int, hasher Hasher64[K], opts ...Option[K, V]) Cache[K, V] {
+	if n <= 0 {
+		panic("imcache: number of shards must be greater than 0")
+	}
+	if hasher == nil {
+		panic("imcache: hasher must be not nil")
+	}
+	shards := make([]*shard[K, V], n)
+	for i := 0; i < n; i++ {
+		shards[i] = newShard(opts...)
+	}
+	return &sharded[K, V]{
+		shards: shards,
+		hasher: hasher,
+		mask:   uint64(n - 1),
+	}
+}
+
+// sharded is a sharded cache.
+type sharded[K comparable, V any] struct {
+	shards []*shard[K, V]
+	hasher Hasher64[K]
+	mask   uint64
+}
+
+func (s *sharded[K, V]) shard(key K) Cache[K, V] {
+	return s.shards[s.hasher.Sum64(key)&s.mask]
+}
+
+func (s *sharded[K, V]) Get(key K) (V, error) {
+	return s.shard(key).Get(key)
+}
+
+func (s *sharded[K, V]) Set(key K, val V, exp Expiration) {
+	s.shard(key).Set(key, val, exp)
+}
+
+func (s *sharded[K, V]) Add(key K, val V, exp Expiration) error {
+	return s.shard(key).Add(key, val, exp)
+}
+
+func (s *sharded[K, V]) Replace(key K, val V, exp Expiration) error {
+	return s.shard(key).Replace(key, val, exp)
+}
+
+func (s *sharded[K, V]) Remove(key K) error {
+	return s.shard(key).Remove(key)
+}
+
+func (s *sharded[K, V]) RemoveAll() {
+	now := time.Now()
+	for _, shard := range s.shards {
+		shard.removeAll(now)
+	}
+}
+
+func (s *sharded[K, V]) RemoveStale() {
+	now := time.Now()
+	for _, shard := range s.shards {
+		shard.removeStale(now)
+	}
+}
+
+func (s *sharded[K, V]) GetAll() map[K]V {
+	now := time.Now()
+	var n int
+	ms := make([]map[K]V, 0, len(s.shards))
+	for _, shard := range s.shards {
+		m := shard.getAll(now)
+		n += len(m)
+		ms = append(ms, m)
+	}
+	all := make(map[K]V, n)
+	for _, m := range ms {
+		for key, val := range m {
+			all[key] = val
+		}
+	}
+	return all
+}
+
+func (s *sharded[K, V]) Len() int {
+	var n int
+	for _, shard := range s.shards {
+		n += shard.Len()
+	}
 	return n
 }

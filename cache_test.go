@@ -559,6 +559,46 @@ func TestCache_RemoveStale(t *testing.T) {
 	}
 }
 
+func TestCache_GetAll(t *testing.T) {
+	tests := []struct {
+		name string
+		c    Cache[string, string]
+	}{
+		{
+			name: "not sharded",
+			c:    New[string, string](),
+		},
+		{
+			name: "sharded",
+			c:    NewSharded[string, string](4, DefaultStringHasher64{}),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := tt.c
+			if err := c.Add("foo", "foo", WithNoExpiration()); err != nil {
+				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
+			}
+			if err := c.Add("foobar", "foobar", WithNoExpiration()); err != nil {
+				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
+			}
+			if err := c.Add("bar", "bar", WithExpiration(time.Nanosecond)); err != nil {
+				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "bar", err)
+			}
+			<-time.After(time.Nanosecond)
+			got := c.GetAll()
+			want := map[string]string{
+				"foo":    "foo",
+				"foobar": "foobar",
+			}
+			if !cmp.Equal(got, want) {
+				t.Errorf("Cache.GetAll() = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
 func TestCache_Len(t *testing.T) {
 	tests := []struct {
 		name string
@@ -965,6 +1005,52 @@ func TestCache_RemoveStale_EvictionCallback(t *testing.T) {
 			}
 			if !evictioncMock.HasBeenCalledWith("foo", "foo", EvictionReasonExpired) {
 				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "foo", "foo", EvictionReasonExpired)
+			}
+		})
+	}
+}
+
+func TestCache_GetAll_EvictionCallback(t *testing.T) {
+	evictioncMock := &evictionCallbackMock{}
+
+	tests := []struct {
+		name string
+		c    Cache[string, interface{}]
+	}{
+		{
+			name: "not sharded",
+			c:    New(WithEvictionCallbackOption(evictioncMock.Callback)),
+		},
+		{
+			name: "sharded",
+			c:    NewSharded[string](8, DefaultStringHasher64{}, WithEvictionCallbackOption(evictioncMock.Callback)),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer evictioncMock.Reset()
+			c := tt.c
+			if err := c.Add("foo", "foo", WithNoExpiration()); err != nil {
+				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
+			}
+			if err := c.Add("foobar", "foobar", WithNoExpiration()); err != nil {
+				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
+			}
+			if err := c.Add("bar", "bar", WithExpiration(time.Nanosecond)); err != nil {
+				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "bar", err)
+			}
+			<-time.After(time.Nanosecond)
+			got := c.GetAll()
+			want := map[string]interface{}{
+				"foo":    "foo",
+				"foobar": "foobar",
+			}
+			if !cmp.Equal(got, want) {
+				t.Errorf("Cache.GetAll() = %v, want %v", got, want)
+			}
+			if !evictioncMock.HasBeenCalledWith("bar", "bar", EvictionReasonExpired) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "bar", "bar", EvictionReasonExpired)
 			}
 		})
 	}
