@@ -60,14 +60,7 @@ type Cache[K comparable, V any] interface {
 // no default sliding expiration and no eviction callback.
 // Option(s) can be used to customize the returned Cache.
 func New[K comparable, V any](opts ...Option[K, V]) Cache[K, V] {
-	s := &shard[K, V]{
-		m:          make(map[K]entry[V]),
-		defaultExp: -1,
-	}
-	for _, opt := range opts {
-		opt.apply(s)
-	}
-	return s
+	return newShard(opts...)
 }
 
 // NewSharded returns a new Cache instance consisting of n shards
@@ -83,9 +76,9 @@ func NewSharded[K comparable, V any](n int, hasher Hasher64[K], opts ...Option[K
 	if hasher == nil {
 		panic("imcache: hasher must be not nil")
 	}
-	shards := make([]Cache[K, V], n)
+	shards := make([]*shard[K, V], n)
 	for i := 0; i < n; i++ {
-		shards[i] = New(opts...)
+		shards[i] = newShard(opts...)
 	}
 	return &sharded[K, V]{
 		shards: shards,
@@ -96,7 +89,7 @@ func NewSharded[K comparable, V any](n int, hasher Hasher64[K], opts ...Option[K
 
 // sharded is a sharded cache.
 type sharded[K comparable, V any] struct {
-	shards []Cache[K, V]
+	shards []*shard[K, V]
 	hasher Hasher64[K]
 	mask   uint64
 }
@@ -122,14 +115,16 @@ func (s *sharded[K, V]) Remove(key K) error {
 }
 
 func (s *sharded[K, V]) RemoveAll() {
+	now := time.Now()
 	for _, shard := range s.shards {
-		shard.RemoveAll()
+		shard.removeAll(now)
 	}
 }
 
 func (s *sharded[K, V]) RemoveStale() {
+	now := time.Now()
 	for _, shard := range s.shards {
-		shard.RemoveStale()
+		shard.removeStale(now)
 	}
 }
 
@@ -145,6 +140,18 @@ func (s *sharded[K, V]) shard(key K) Cache[K, V] {
 	return s.shards[s.hasher.Sum64(key)&s.mask]
 }
 
+func newShard[K comparable, V any](opts ...Option[K, V]) *shard[K, V] {
+	s := &shard[K, V]{
+		m:          make(map[K]entry[V]),
+		defaultExp: -1,
+	}
+	for _, opt := range opts {
+		opt.apply(s)
+	}
+	return s
+}
+
+// shard is a non-sharded cache.
 type shard[K comparable, V any] struct {
 	mu sync.Mutex
 
@@ -157,8 +164,8 @@ type shard[K comparable, V any] struct {
 }
 
 func (s *shard[K, V]) Get(key K) (V, error) {
-	var empty V
 	now := time.Now()
+	var empty V
 	s.mu.Lock()
 	entry, ok := s.m[key]
 	if !ok {
@@ -246,6 +253,7 @@ func (s *shard[K, V]) Replace(key K, val V, exp Expiration) error {
 }
 
 func (s *shard[K, V]) Remove(key K) error {
+	now := time.Now()
 	s.mu.Lock()
 	entry, ok := s.m[key]
 	if !ok {
@@ -254,7 +262,7 @@ func (s *shard[K, V]) Remove(key K) error {
 	}
 	delete(s.m, key)
 	s.mu.Unlock()
-	if entry.HasExpired(time.Now()) {
+	if entry.HasExpired(now) {
 		if s.onEviction != nil {
 			s.onEviction(key, entry.val, EvictionReasonExpired)
 		}
@@ -267,13 +275,17 @@ func (s *shard[K, V]) Remove(key K) error {
 }
 
 func (s *shard[K, V]) RemoveAll() {
+	s.removeAll(time.Now())
+}
+
+func (s *shard[K, V]) removeAll(now time.Time) {
 	s.mu.Lock()
 	removed := s.m
 	s.m = make(map[K]entry[V])
 	s.mu.Unlock()
 	if s.onEviction != nil {
 		for key, entry := range removed {
-			if entry.HasExpired(time.Now()) {
+			if entry.HasExpired(now) {
 				s.onEviction(key, entry.val, EvictionReasonExpired)
 			} else {
 				s.onEviction(key, entry.val, EvictionReasonRemoved)
@@ -282,13 +294,11 @@ func (s *shard[K, V]) RemoveAll() {
 	}
 }
 
-type kv[K comparable, V any] struct {
-	key K
-	val V
+func (s *shard[K, V]) RemoveStale() {
+	s.removeStale(time.Now())
 }
 
-func (s *shard[K, V]) RemoveStale() {
-	now := time.Now()
+func (s *shard[K, V]) removeStale(now time.Time) {
 	s.mu.Lock()
 	if s.onEviction == nil {
 		for key, entry := range s.m {
@@ -310,6 +320,11 @@ func (s *shard[K, V]) RemoveStale() {
 	for _, kv := range removed {
 		s.onEviction(kv.key, kv.val, EvictionReasonExpired)
 	}
+}
+
+type kv[K comparable, V any] struct {
+	key K
+	val V
 }
 
 func (s *shard[K, V]) Len() int {
