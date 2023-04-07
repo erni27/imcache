@@ -446,7 +446,7 @@ func TestCache_Remove(t *testing.T) {
 			name: "success - sharded",
 			c: func() Cache[string, string] {
 				c := NewSharded[string, string](2, DefaultStringHasher64{})
-				c.Set("foo", "foo", WithNoExpiration())
+				c.Set("foo", "foo", WithExpirationDate(time.Now().Add(time.Minute)))
 				return c
 			},
 			key: "foo",
@@ -465,7 +465,7 @@ func TestCache_Remove(t *testing.T) {
 			name: "entry expired - sharded",
 			c: func() Cache[string, string] {
 				c := NewSharded[string, string](8, DefaultStringHasher64{})
-				c.Set("foo", "foo", WithExpiration(time.Nanosecond))
+				c.Set("foo", "foo", WithExpirationDate(time.Now().Add(time.Nanosecond)))
 				<-time.After(time.Nanosecond)
 				return c
 			},
