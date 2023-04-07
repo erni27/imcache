@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math/rand"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -748,16 +749,18 @@ type evictionCallbackCall struct {
 }
 
 type evictionCallbackMock struct {
+	mu    sync.Mutex
 	calls []evictionCallbackCall
 }
 
 func (m *evictionCallbackMock) Callback(key string, val interface{}, reason EvictionReason) {
+	m.mu.Lock()
 	m.calls = append(m.calls, evictionCallbackCall{key, val, reason})
+	m.mu.Unlock()
 }
 
-type anyValue struct{}
-
 func (m *evictionCallbackMock) HasBeenCalledWith(key string, val interface{}, reason EvictionReason) bool {
+	m.mu.Lock()
 	var call evictionCallbackCall
 	for _, c := range m.calls {
 		if c.key == key {
@@ -765,9 +768,7 @@ func (m *evictionCallbackMock) HasBeenCalledWith(key string, val interface{}, re
 			break
 		}
 	}
-	if _, ok := val.(anyValue); ok {
-		return call.key == key && call.reason == reason
-	}
+	m.mu.Unlock()
 	return call.key == key && call.val == val && call.reason == reason
 }
 
@@ -1117,4 +1118,136 @@ func TestNewSharded_NilHasher(t *testing.T) {
 		}
 	}()
 	_ = NewSharded[string, string](2, nil)
+}
+
+func TestCache_StartCleaner_InvalidInterval(t *testing.T) {
+	tests := []struct {
+		name string
+		c    Cache[string, string]
+	}{
+		{
+			name: "not sharded",
+			c:    New[string, string](),
+		},
+		{
+			name: "sharded",
+			c:    NewSharded[string, string](8, DefaultStringHasher64{}),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := New[string, string]()
+			defer func() {
+				if r := recover(); r == nil {
+					t.Errorf("Cache.StartCleaner(-1) did not panic")
+				}
+			}()
+			c.StartCleaner(-1)
+		})
+	}
+}
+
+func TestCache_StartCleaner(t *testing.T) {
+	evictioncMock := &evictionCallbackMock{}
+
+	tests := []struct {
+		name string
+		c    Cache[string, interface{}]
+	}{
+		{
+			name: "not sharded",
+			c:    New(WithEvictionCallbackOption(evictioncMock.Callback)),
+		},
+		{
+			name: "sharded",
+			c:    NewSharded[string](8, DefaultStringHasher64{}, WithEvictionCallbackOption(evictioncMock.Callback)),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer evictioncMock.Reset()
+			c := tt.c
+			if err := c.Add("foo", "foo", WithExpiration(time.Millisecond)); err != nil {
+				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
+			}
+			if err := c.Add("bar", "bar", WithExpiration(time.Millisecond)); err != nil {
+				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "bar", err)
+			}
+			if err := c.Add("foobar", "foobar", WithExpiration(20*time.Millisecond)); err != nil {
+				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "bar", err)
+			}
+			c.StartCleaner(2 * time.Millisecond)
+			// Subsequent calls to StartCleaner should not start a new cleaner.
+			c.StartCleaner(5 * time.Nanosecond)
+			c.StartCleaner(7 * time.Millisecond)
+			<-time.After(3 * time.Millisecond)
+			if !evictioncMock.HasBeenCalledWith("foo", "foo", EvictionReasonExpired) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "foo", "foo", EvictionReasonExpired)
+			}
+			if !evictioncMock.HasBeenCalledWith("bar", "bar", EvictionReasonExpired) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "bar", "bar", EvictionReasonExpired)
+			}
+			if evictioncMock.HasBeenCalledWith("foobar", "foobar", EvictionReasonExpired) {
+				t.Errorf("want EvictionCallback not called with EvictionCallback(%s, %s, %d)", "foobar", "foobar", EvictionReasonExpired)
+			}
+			<-time.After(100 * time.Millisecond)
+			if !evictioncMock.HasBeenCalledWith("foobar", "foobar", EvictionReasonExpired) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "foobar", "foobar", EvictionReasonExpired)
+			}
+		})
+	}
+}
+
+func TestCache_StopCleaner(t *testing.T) {
+	evictioncMock := &evictionCallbackMock{}
+
+	tests := []struct {
+		name string
+		c    Cache[string, interface{}]
+	}{
+		{
+			name: "not sharded",
+			c:    New(WithEvictionCallbackOption(evictioncMock.Callback)),
+		},
+		{
+			name: "sharded",
+			c:    NewSharded[string](8, DefaultStringHasher64{}, WithEvictionCallbackOption(evictioncMock.Callback)),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer evictioncMock.Reset()
+			c := tt.c
+			if err := c.Add("foo", "foo", WithExpiration(time.Millisecond)); err != nil {
+				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
+			}
+			if err := c.Add("bar", "bar", WithExpiration(time.Millisecond)); err != nil {
+				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "bar", err)
+			}
+			if err := c.Add("foobar", "foobar", WithExpiration(20*time.Millisecond)); err != nil {
+				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "bar", err)
+			}
+			c.StartCleaner(2 * time.Millisecond)
+			<-time.After(3 * time.Millisecond)
+			if !evictioncMock.HasBeenCalledWith("foo", "foo", EvictionReasonExpired) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "foo", "foo", EvictionReasonExpired)
+			}
+			if !evictioncMock.HasBeenCalledWith("bar", "bar", EvictionReasonExpired) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "bar", "bar", EvictionReasonExpired)
+			}
+			if evictioncMock.HasBeenCalledWith("foobar", "foobar", EvictionReasonExpired) {
+				t.Errorf("want EvictionCallback not called with EvictionCallback(%s, %s, %d)", "foobar", "foobar", EvictionReasonExpired)
+			}
+			c.StopCleaner()
+			// Subsequent calls to StopCleaner should do nothing.
+			c.StopCleaner()
+			c.StopCleaner()
+			if evictioncMock.HasBeenCalledWith("foobar", "foobar", EvictionReasonExpired) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "foobar", "foobar", EvictionReasonExpired)
+			}
+		})
+	}
 }
