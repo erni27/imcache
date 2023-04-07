@@ -599,6 +599,51 @@ func TestCache_GetAll(t *testing.T) {
 	}
 }
 
+func TestCache_GetAll_SlidingExpiration(t *testing.T) {
+	tests := []struct {
+		name string
+		c    Cache[string, string]
+	}{
+		{
+			name: "not sharded",
+			c:    New[string, string](),
+		},
+		{
+			name: "sharded",
+			c:    NewSharded[string, string](8, DefaultStringHasher64{}),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := tt.c
+			if err := c.Add("foo", "foo", WithSlidingExpiration(500*time.Millisecond)); err != nil {
+				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
+			}
+			if err := c.Add("bar", "bar", WithSlidingExpiration(500*time.Millisecond)); err != nil {
+				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
+			}
+			<-time.After(300 * time.Millisecond)
+			want := map[string]string{
+				"foo": "foo",
+				"bar": "bar",
+			}
+			if got := c.GetAll(); !cmp.Equal(got, want) {
+				t.Errorf("Cache.GetAll() = %v, want %v", got, want)
+			}
+			<-time.After(300 * time.Millisecond)
+			if got := c.GetAll(); !cmp.Equal(got, want) {
+				t.Errorf("Cache.GetAll() = %v, want %v", got, want)
+			}
+			<-time.After(500 * time.Millisecond)
+			want = map[string]string{}
+			if got := c.GetAll(); !cmp.Equal(got, want) {
+				t.Errorf("Cache.GetAll() = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
 func TestCache_Len(t *testing.T) {
 	tests := []struct {
 		name string

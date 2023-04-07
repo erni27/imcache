@@ -262,6 +262,10 @@ func (s *shard[K, V]) getAll(now time.Time) map[K]V {
 			if entry.HasExpired(now) {
 				delete(s.m, key)
 			} else {
+				if entry.HasSlidingExpiration() {
+					entry.SlideExpiration(now)
+					s.m[key] = entry
+				}
 				m[key] = entry.val
 			}
 		}
@@ -275,6 +279,10 @@ func (s *shard[K, V]) getAll(now time.Time) map[K]V {
 			expired = append(expired, kv[K, V]{key: key, val: entry.val})
 			delete(s.m, key)
 		} else {
+			if entry.HasSlidingExpiration() {
+				entry.SlideExpiration(now)
+				s.m[key] = entry
+			}
 			m[key] = entry.val
 		}
 	}
