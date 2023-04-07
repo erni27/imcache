@@ -1034,7 +1034,7 @@ func TestCache_GetAll_EvictionCallback(t *testing.T) {
 			if err := c.Add("foo", "foo", WithNoExpiration()); err != nil {
 				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
 			}
-			if err := c.Add("foobar", "foobar", WithNoExpiration()); err != nil {
+			if err := c.Add("foobar", "foobar", WithSlidingExpiration(time.Second)); err != nil {
 				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
 			}
 			if err := c.Add("bar", "bar", WithExpiration(time.Nanosecond)); err != nil {
