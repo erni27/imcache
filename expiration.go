@@ -7,6 +7,11 @@ const (
 	defaultExp = 0
 )
 
+type expiration struct {
+	date    int64
+	sliding time.Duration
+}
+
 // Expiration is the expiration time of an entry.
 type Expiration interface {
 	apply(*expiration)
@@ -22,6 +27,13 @@ func (f expirationf) apply(e *expiration) {
 func WithExpiration(d time.Duration) Expiration {
 	return expirationf(func(e *expiration) {
 		e.date = time.Now().Add(d).UnixNano()
+	})
+}
+
+// WithExpirationDate returns an Expiration that sets the expiration time to t.
+func WithExpirationDate(t time.Time) Expiration {
+	return expirationf(func(e *expiration) {
+		e.date = t.UnixNano()
 	})
 }
 

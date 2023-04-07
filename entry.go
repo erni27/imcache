@@ -2,11 +2,6 @@ package imcache
 
 import "time"
 
-type expiration struct {
-	date    int64
-	sliding time.Duration
-}
-
 // entry is the value stored in the cache.
 type entry[V any] struct {
 	val V
