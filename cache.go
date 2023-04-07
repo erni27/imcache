@@ -54,6 +54,17 @@ type Cache[K comparable, V any] interface {
 	GetAll() map[K]V
 	// Len returns the number of entries in the cache.
 	Len() int
+	// StartCleaner starts a cleaner that periodically removes expired entries.
+	// A cleaner runs in a separate goroutine.
+	// It's a NOP method if the cleaner is already running.
+	// It panics if the interval is less than or equal to zero.
+	//
+	// The cleaner can be stopped by calling StopCleaner method.
+	StartCleaner(interval time.Duration)
+	// StopCleaner stops the cleaner.
+	// It is a blocking method that waits for the cleaner to stop.
+	// It's a NOP method if the cleaner is not running.
+	StopCleaner()
 }
 
 // New returns a new non-sharded Cache instance.
@@ -69,6 +80,7 @@ func newShard[K comparable, V any](opts ...Option[K, V]) *shard[K, V] {
 	s := &shard[K, V]{
 		m:          make(map[K]entry[V]),
 		defaultExp: -1,
+		cleaner:    newCleaner(),
 	}
 	for _, opt := range opts {
 		opt.apply(s)
@@ -79,13 +91,14 @@ func newShard[K comparable, V any](opts ...Option[K, V]) *shard[K, V] {
 // shard is a non-sharded cache.
 type shard[K comparable, V any] struct {
 	mu sync.Mutex
-
-	m map[K]entry[V]
+	m  map[K]entry[V]
 
 	defaultExp time.Duration
 	sliding    bool
 
 	onEviction EvictionCallback[K, V]
+
+	cleaner *cleaner
 }
 
 func (s *shard[K, V]) Get(key K) (V, error) {
@@ -304,8 +317,17 @@ func (s *shard[K, V]) Len() int {
 	return n
 }
 
+func (s *shard[K, V]) StartCleaner(interval time.Duration) {
+	s.cleaner.start(s, interval)
+}
+
+func (s *shard[K, V]) StopCleaner() {
+	s.cleaner.stop()
+}
+
 // NewSharded returns a new Cache instance consisting of n shards
 // and sharded by the given Hasher64.
+// It panics if n is not greater than 0 or hasher is nil.
 //
 // By default a returned Cache has no default expiration,
 // no default sliding expiration and no eviction callback.
@@ -322,9 +344,10 @@ func NewSharded[K comparable, V any](n int, hasher Hasher64[K], opts ...Option[K
 		shards[i] = newShard(opts...)
 	}
 	return &sharded[K, V]{
-		shards: shards,
-		hasher: hasher,
-		mask:   uint64(n - 1),
+		shards:  shards,
+		hasher:  hasher,
+		mask:    uint64(n - 1),
+		cleaner: newCleaner(),
 	}
 }
 
@@ -333,6 +356,8 @@ type sharded[K comparable, V any] struct {
 	shards []*shard[K, V]
 	hasher Hasher64[K]
 	mask   uint64
+
+	cleaner *cleaner
 }
 
 func (s *sharded[K, V]) shard(key K) Cache[K, V] {
@@ -397,4 +422,12 @@ func (s *sharded[K, V]) Len() int {
 		n += shard.Len()
 	}
 	return n
+}
+
+func (s *sharded[K, V]) StartCleaner(interval time.Duration) {
+	s.cleaner.start(s, interval)
+}
+
+func (s *sharded[K, V]) StopCleaner() {
+	s.cleaner.stop()
 }
