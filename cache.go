@@ -38,6 +38,23 @@ type Cache[K comparable, V any] interface {
 	//
 	// If you want to add or replace an entry, use the Set method instead.
 	Replace(key K, val V, exp Expiration) (present bool)
+	// ReplaceWithFunc replaces the value for the given key
+	// with the result of the given function that takes the old value as an argument.
+	// It returns true if the value is present and replaced, otherwise it returns false.
+	//
+	// If it encounters an expired entry, the expired entry is evicted.
+	//
+	// If you want to replace the value with a new value not depending on the old value,
+	// use the Replace method instead.
+	//
+	// imcache provides the Increment and Decrement functions that can be used as f
+	// to increment or decrement the old value.
+	//
+	// Example:
+	//	c := imcache.New[string, int32]()
+	//	c.Set("foo", 997, imcache.WithNoExpiration())
+	//	_ = c.ReplaceWithFunc("foo", imcache.Increment[int32], imcache.WithNoExpiration())
+	ReplaceWithFunc(key K, f func(old V) (new V), exp Expiration) (present bool)
 	// Remove removes the cache entry for the given key.
 	//
 	// It returns true if the entry is present and removed,
@@ -193,6 +210,33 @@ func (s *shard[K, V]) Replace(key K, val V, exp Expiration) bool {
 		}
 		return false
 	}
+	s.m[key] = entry
+	s.mu.Unlock()
+	if s.onEviction != nil {
+		s.onEviction(key, current.val, EvictionReasonReplaced)
+	}
+	return true
+}
+
+func (s *shard[K, V]) ReplaceWithFunc(key K, f func(V) V, exp Expiration) bool {
+	now := time.Now()
+	s.mu.Lock()
+	current, ok := s.m[key]
+	if !ok {
+		s.mu.Unlock()
+		return false
+	}
+	if current.HasExpired(now) {
+		delete(s.m, key)
+		s.mu.Unlock()
+		if s.onEviction != nil {
+			s.onEviction(key, current.val, EvictionReasonExpired)
+		}
+		return false
+	}
+	entry := entry[V]{val: f(current.val)}
+	exp.apply(&entry.exp)
+	entry.SetDefault(now, s.defaultExp, s.sliding)
 	s.m[key] = entry
 	s.mu.Unlock()
 	if s.onEviction != nil {
@@ -389,6 +433,10 @@ func (s *sharded[K, V]) GetOrSet(key K, val V, exp Expiration) (v V, present boo
 
 func (s *sharded[K, V]) Replace(key K, val V, exp Expiration) bool {
 	return s.shard(key).Replace(key, val, exp)
+}
+
+func (s *sharded[K, V]) ReplaceWithFunc(key K, fn func(V) V, exp Expiration) bool {
+	return s.shard(key).ReplaceWithFunc(key, fn, exp)
 }
 
 func (s *sharded[K, V]) Remove(key K) bool {

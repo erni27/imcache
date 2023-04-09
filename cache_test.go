@@ -400,6 +400,101 @@ func TestCache_Replace(t *testing.T) {
 	}
 }
 
+func TestCache_ReplaceWithFunc(t *testing.T) {
+	tests := []struct {
+		name    string
+		c       func() Cache[string, int32]
+		key     string
+		f       func(int32) int32
+		want    bool
+		val     int32
+		present bool
+	}{
+		{
+			name: "success",
+			c: func() Cache[string, int32] {
+				c := New[string, int32]()
+				c.Set("foo", 997, WithNoExpiration())
+				return c
+			},
+			key:     "foo",
+			f:       Increment[int32],
+			want:    true,
+			val:     998,
+			present: true,
+		},
+		{
+			name: "entry expired",
+			c: func() Cache[string, int32] {
+				c := New[string, int32]()
+				c.Set("foo", 997, WithExpiration(time.Nanosecond))
+				<-time.After(time.Nanosecond)
+				return c
+			},
+			key: "foo",
+			f:   Increment[int32],
+		},
+		{
+			name: "entry doesn't exist",
+			c: func() Cache[string, int32] {
+				c := New[string, int32]()
+				return c
+			},
+			key: "foo",
+			f:   Increment[int32],
+		},
+		{
+			name: "success - sharded",
+			c: func() Cache[string, int32] {
+				c := NewSharded[string, int32](2, DefaultStringHasher64{})
+				c.Set("foo", 997, WithNoExpiration())
+				return c
+			},
+			key:     "foo",
+			f:       Decrement[int32],
+			want:    true,
+			val:     996,
+			present: true,
+		},
+		{
+			name: "entry expired - sharded",
+			c: func() Cache[string, int32] {
+				c := NewSharded[string, int32](4, DefaultStringHasher64{})
+				c.Set("foo", 997, WithExpiration(time.Nanosecond))
+				<-time.After(time.Nanosecond)
+				return c
+			},
+			key: "foo",
+			f:   Increment[int32],
+		},
+		{
+			name: "entry doesn't exist - sharded",
+			c: func() Cache[string, int32] {
+				c := NewSharded[string, int32](8, DefaultStringHasher64{})
+				return c
+			},
+			key: "foo",
+			f:   Increment[int32],
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := tt.c()
+			if ok := c.ReplaceWithFunc(tt.key, tt.f, WithDefaultExpiration()); ok != tt.present {
+				t.Fatalf("Cache.Replace(%s, _, _) = %t, want %t", tt.key, ok, tt.present)
+			}
+			got, ok := c.Get(tt.key)
+			if ok != tt.present {
+				t.Fatalf("Cache.Get(%s) = _, %t, want _, %t", tt.key, ok, tt.present)
+			}
+			if !cmp.Equal(got, tt.val) {
+				t.Errorf("Cache.Get(%s) = %v, _, want %v, _", tt.key, got, tt.val)
+			}
+		})
+	}
+}
+
 func TestCache_Remove(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -892,6 +987,46 @@ func TestCache_Replace_EvictionCallback(t *testing.T) {
 	}
 }
 
+func TestCache_ReplaceWithFunc_EvictionCallback(t *testing.T) {
+	evictioncMock := &evictionCallbackMock{}
+
+	tests := []struct {
+		name string
+		c    Cache[string, interface{}]
+	}{
+		{
+			name: "not sharded",
+			c:    New(WithEvictionCallbackOption(evictioncMock.Callback)),
+		},
+		{
+			name: "sharded",
+			c:    NewSharded[string](8, DefaultStringHasher64{}, WithEvictionCallbackOption(evictioncMock.Callback)),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer evictioncMock.Reset()
+			c := tt.c
+			c.Set("foo", 1, WithExpiration(time.Nanosecond))
+			c.Set("bar", 2, WithNoExpiration())
+			<-time.After(time.Nanosecond)
+			if ok := c.ReplaceWithFunc("foo", func(interface{}) interface{} { return 997 }, WithNoExpiration()); ok {
+				t.Errorf("Cache.Replace(%s, _, _) = %t, want false", "foo", ok)
+			}
+			if !evictioncMock.HasBeenCalledWith("foo", 1, EvictionReasonExpired) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "foo", 1, EvictionReasonExpired)
+			}
+			if ok := c.ReplaceWithFunc("bar", func(interface{}) interface{} { return 997 }, WithNoExpiration()); !ok {
+				t.Errorf("Cache.Replace(%s, _, _) = %t, want true", "bar", ok)
+			}
+			if !evictioncMock.HasBeenCalledWith("bar", 2, EvictionReasonReplaced) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "bar", 2, EvictionReasonReplaced)
+			}
+		})
+	}
+}
+
 func TestCache_Remove_EvictionCallback(t *testing.T) {
 	evictioncMock := &evictionCallbackMock{}
 
@@ -1108,12 +1243,12 @@ func TestCache_StartCleaner(t *testing.T) {
 			c := tt.c
 			c.Set("foo", "foo", WithExpiration(time.Millisecond))
 			c.Set("bar", "bar", WithExpiration(time.Millisecond))
-			c.Set("foobar", "foobar", WithExpiration(20*time.Millisecond))
-			c.StartCleaner(2 * time.Millisecond)
+			c.Set("foobar", "foobar", WithExpiration(100*time.Millisecond))
+			c.StartCleaner(20 * time.Millisecond)
 			// Subsequent calls to StartCleaner should not start a new cleaner.
 			c.StartCleaner(5 * time.Nanosecond)
 			c.StartCleaner(7 * time.Millisecond)
-			<-time.After(3 * time.Millisecond)
+			<-time.After(30 * time.Millisecond)
 			if !evictioncMock.HasBeenCalledWith("foo", "foo", EvictionReasonExpired) {
 				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "foo", "foo", EvictionReasonExpired)
 			}
@@ -1123,7 +1258,7 @@ func TestCache_StartCleaner(t *testing.T) {
 			if evictioncMock.HasBeenCalledWith("foobar", "foobar", EvictionReasonExpired) {
 				t.Errorf("want EvictionCallback not called with EvictionCallback(%s, %s, %d)", "foobar", "foobar", EvictionReasonExpired)
 			}
-			<-time.After(100 * time.Millisecond)
+			<-time.After(200 * time.Millisecond)
 			if !evictioncMock.HasBeenCalledWith("foobar", "foobar", EvictionReasonExpired) {
 				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "foobar", "foobar", EvictionReasonExpired)
 			}
