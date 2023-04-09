@@ -1243,12 +1243,12 @@ func TestCache_StartCleaner(t *testing.T) {
 			c := tt.c
 			c.Set("foo", "foo", WithExpiration(time.Millisecond))
 			c.Set("bar", "bar", WithExpiration(time.Millisecond))
-			c.Set("foobar", "foobar", WithExpiration(20*time.Millisecond))
-			c.StartCleaner(2 * time.Millisecond)
+			c.Set("foobar", "foobar", WithExpiration(100*time.Millisecond))
+			c.StartCleaner(20 * time.Millisecond)
 			// Subsequent calls to StartCleaner should not start a new cleaner.
 			c.StartCleaner(5 * time.Nanosecond)
 			c.StartCleaner(7 * time.Millisecond)
-			<-time.After(3 * time.Millisecond)
+			<-time.After(30 * time.Millisecond)
 			if !evictioncMock.HasBeenCalledWith("foo", "foo", EvictionReasonExpired) {
 				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "foo", "foo", EvictionReasonExpired)
 			}
@@ -1258,7 +1258,7 @@ func TestCache_StartCleaner(t *testing.T) {
 			if evictioncMock.HasBeenCalledWith("foobar", "foobar", EvictionReasonExpired) {
 				t.Errorf("want EvictionCallback not called with EvictionCallback(%s, %s, %d)", "foobar", "foobar", EvictionReasonExpired)
 			}
-			<-time.After(100 * time.Millisecond)
+			<-time.After(200 * time.Millisecond)
 			if !evictioncMock.HasBeenCalledWith("foobar", "foobar", EvictionReasonExpired) {
 				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "foobar", "foobar", EvictionReasonExpired)
 			}
