@@ -49,7 +49,7 @@ c.Set(1, "one", imcache.WithNoExpiration())
 // Set a new value with a sliding expiration time.
 c.Set(2, "two", imcache.WithSlidingExpiration(time.Second))
 // Set a new value with an absolute expiration time.
-c.Set(3, "three", imcache.WithSlidingExpiration(time.Second))
+c.Set(3, "three", imcache.WithExpiration(time.Second))
 ```
 
 If you want to use default expiration time for the given cache instance, you can use the `WithDefaultExpiration` `Expiration` option. By default the default expiration time is set to no expiration. You can set the default expiration time when creating a new `Cache` instance.
@@ -57,12 +57,12 @@ If you want to use default expiration time for the given cache instance, you can
 ```go
 // Create a new Cache instance with default absolute expiration time equal to 1 second.
 c1 := imcache.New(imcache.WithDefaultExpirationOption[int32, string](time.Second))
-// Set a new value with default expiration time.
+// Set a new value with default expiration time (absolute).
 c1.Set(1, "one", imcache.WithDefaultExpiration())
 
 // Create a new Cache instance with default sliding expiration time equal to 1 second.
 c2 := imcache.New(imcache.WithDefaultSlidingExpirationOption[int32, string](time.Second))
-// Set a new value with default expiration time.
+// Set a new value with default expiration time (sliding).
 c2.Set(1, "one", imcache.WithDefaultExpiration())
 ```
 
