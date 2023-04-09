@@ -46,6 +46,14 @@ type Cache[K comparable, V any] interface {
 	//
 	// If you want to replace the value with a new value not depending on the old value,
 	// use the Replace method instead.
+	//
+	// imcache provides the Increment and Decrement functions that can be used as f
+	// to increment or decrement the old value.
+	//
+	// Example:
+	//	c := imcache.New[string, int32]()
+	//	c.Set("foo", 997, imcache.WithNoExpiration())
+	//	_ = c.ReplaceWithFunc("foo", imcache.Increment[int32], imcache.WithNoExpiration())
 	ReplaceWithFunc(key K, f func(old V) (new V), exp Expiration) (present bool)
 	// Remove removes the cache entry for the given key.
 	//

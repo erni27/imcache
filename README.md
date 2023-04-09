@@ -58,7 +58,7 @@ func main() {
 	fmt.Println(got)
 	time.Sleep(1 * time.Second)
 
-    // Entry with key 2 should expire.
+	// Entry with key 2 should expire.
 	got, ok = c.Get(1)
 	if !ok {
 		panic("key 1 not found")

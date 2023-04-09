@@ -451,9 +451,9 @@ func TestCache_ReplaceWithFunc(t *testing.T) {
 				return c
 			},
 			key:     "foo",
-			f:       Increment[int32],
+			f:       Decrement[int32],
 			want:    true,
-			val:     998,
+			val:     996,
 			present: true,
 		},
 		{
