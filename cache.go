@@ -8,49 +8,60 @@
 package imcache
 
 import (
-	"errors"
 	"sync"
 	"time"
 )
 
-var (
-	// ErrNotFound is returned when an entry for a given key is not found in the cache.
-	ErrNotFound = errors.New("imcache: not found")
-	// ErrAlreadyExists is returned when an entry for a given key already exists in the cache.
-	ErrAlreadyExists = errors.New("imcache: already exists")
-)
-
-// Cache is the interface that wraps the basic cache operations.
+// Cache is the interface that wraps cache operations.
 type Cache[K comparable, V any] interface {
 	// Get returns the value for the given key.
-	// If the entry is not found, ErrNotFound is returned.
-	// If the entry is found but it has expired, ErrNotFound is returned and the entry is evicted.
-	Get(key K) (V, error)
+	//
+	// If it encounters an expired entry, the expired entry is evicted.
+	Get(key K) (v V, present bool)
 	// Set sets the value for the given key.
 	// If the entry already exists, it is replaced.
-	// If you don't want to replace an existing entry, use Add func instead.
-	// If you don't want to add a new entry if it doesn't exist, use Replace func instead.
+	//
+	// If it encounters an expired entry, it is evicted and a new entry is added.
+	//
+	// If you don't want to replace an existing entry, use the GetOrSet method instead.
+	// If you don't want to add a new entry if it doesn't exist, use the Replace method instead.
 	Set(key K, val V, exp Expiration)
-	// Add adds the value for the given key.
-	// If the entry already exists, ErrAlreadyExists is returned.
-	// If you want to replace an existing entry, use Set func instead.
-	Add(key K, val V, exp Expiration) error
+	// GetOrSet returns the value for the given key and true if it exists,
+	// otherwise it sets the value for the given key and returns the set value and false.
+	//
+	// If it encounters an expired entry, the expired entry is evicted.
+	GetOrSet(key K, val V, exp Expiration) (v V, present bool)
 	// Replace replaces the value for the given key.
-	// If the entry is not found, ErrNotFound is returned. If the entry is found but it has expired,
-	// ErrNotFound is returned and the entry is evicted.
-	// If you want to add a new entry if it doesn't exist, use Set func instead.
-	Replace(key K, val V, exp Expiration) error
+	// It returns true if the value is present and replaced, otherwise it returns false.
+	//
+	// If it encounters an expired entry, the expired entry is evicted.
+	//
+	// If you want to add or replace an entry, use the Set method instead.
+	Replace(key K, val V, exp Expiration) (present bool)
 	// Remove removes the cache entry for the given key.
-	// If the entry is found, it is removed and a nil error is returned,
-	// otherwise ErrNotFound is returned.
-	Remove(key K) error
+	//
+	// It returns true if the entry is present and removed,
+	// otherwise it returns false.
+	//
+	// If it encounters an expired entry, the expired entry is evicted.
+	// It results in calling the eviction callback with EvictionReasonExpired,
+	// not EvictionReasonRemoved. If entry is expired, it returns false.
+	Remove(key K) (present bool)
 	// RemoveAll removes all entries.
+	//
 	// If eviction callback is set, it is called for each removed entry.
+	//
+	// If it encounters an expired entry, the expired entry is evicted.
+	// It results in calling the eviction callback with EvictionReasonExpired,
+	// not EvictionReasonRemoved.
 	RemoveAll()
 	// RemoveStale removes all expired entries.
+	//
 	// If eviction callback is set, it is called for each removed entry.
 	RemoveStale()
 	// GetAll returns a copy of all entries in the cache.
+	//
+	// If it encounters an expired entry, the expired entry is evicted.
 	GetAll() map[K]V
 	// Len returns the number of entries in the cache.
 	Len() int
@@ -101,14 +112,14 @@ type shard[K comparable, V any] struct {
 	cleaner *cleaner
 }
 
-func (s *shard[K, V]) Get(key K) (V, error) {
+func (s *shard[K, V]) Get(key K) (V, bool) {
 	now := time.Now()
 	var empty V
 	s.mu.Lock()
 	entry, ok := s.m[key]
 	if !ok {
 		s.mu.Unlock()
-		return empty, ErrNotFound
+		return empty, false
 	}
 	if entry.HasExpired(now) {
 		delete(s.m, key)
@@ -116,14 +127,14 @@ func (s *shard[K, V]) Get(key K) (V, error) {
 		if s.onEviction != nil {
 			s.onEviction(key, entry.val, EvictionReasonExpired)
 		}
-		return empty, ErrNotFound
+		return empty, false
 	}
 	if entry.HasSlidingExpiration() {
 		entry.SlideExpiration(now)
 		s.m[key] = entry
 	}
 	s.mu.Unlock()
-	return entry.val, nil
+	return entry.val, true
 }
 
 func (s *shard[K, V]) Set(key K, val V, exp Expiration) {
@@ -144,7 +155,7 @@ func (s *shard[K, V]) Set(key K, val V, exp Expiration) {
 	}
 }
 
-func (s *shard[K, V]) Add(key K, val V, exp Expiration) error {
+func (s *shard[K, V]) GetOrSet(key K, val V, exp Expiration) (V, bool) {
 	now := time.Now()
 	entry := entry[V]{val: val}
 	exp.apply(&entry.exp)
@@ -153,17 +164,17 @@ func (s *shard[K, V]) Add(key K, val V, exp Expiration) error {
 	current, ok := s.m[key]
 	if ok && !current.HasExpired(now) {
 		s.mu.Unlock()
-		return ErrAlreadyExists
+		return current.val, true
 	}
 	s.m[key] = entry
 	s.mu.Unlock()
 	if ok && s.onEviction != nil {
 		s.onEviction(key, current.val, EvictionReasonExpired)
 	}
-	return nil
+	return entry.val, false
 }
 
-func (s *shard[K, V]) Replace(key K, val V, exp Expiration) error {
+func (s *shard[K, V]) Replace(key K, val V, exp Expiration) bool {
 	now := time.Now()
 	entry := entry[V]{val: val}
 	exp.apply(&entry.exp)
@@ -172,7 +183,7 @@ func (s *shard[K, V]) Replace(key K, val V, exp Expiration) error {
 	current, ok := s.m[key]
 	if !ok {
 		s.mu.Unlock()
-		return ErrNotFound
+		return false
 	}
 	if current.HasExpired(now) {
 		delete(s.m, key)
@@ -180,23 +191,23 @@ func (s *shard[K, V]) Replace(key K, val V, exp Expiration) error {
 		if s.onEviction != nil {
 			s.onEviction(key, current.val, EvictionReasonExpired)
 		}
-		return ErrNotFound
+		return false
 	}
 	s.m[key] = entry
 	s.mu.Unlock()
 	if s.onEviction != nil {
 		s.onEviction(key, current.val, EvictionReasonReplaced)
 	}
-	return nil
+	return true
 }
 
-func (s *shard[K, V]) Remove(key K) error {
+func (s *shard[K, V]) Remove(key K) bool {
 	now := time.Now()
 	s.mu.Lock()
 	entry, ok := s.m[key]
 	if !ok {
 		s.mu.Unlock()
-		return ErrNotFound
+		return false
 	}
 	delete(s.m, key)
 	s.mu.Unlock()
@@ -204,12 +215,12 @@ func (s *shard[K, V]) Remove(key K) error {
 		if s.onEviction != nil {
 			s.onEviction(key, entry.val, EvictionReasonExpired)
 		}
-		return ErrNotFound
+		return false
 	}
 	if s.onEviction != nil {
 		s.onEviction(key, entry.val, EvictionReasonRemoved)
 	}
-	return nil
+	return true
 }
 
 func (s *shard[K, V]) removeAll(now time.Time) {
@@ -364,7 +375,7 @@ func (s *sharded[K, V]) shard(key K) Cache[K, V] {
 	return s.shards[s.hasher.Sum64(key)&s.mask]
 }
 
-func (s *sharded[K, V]) Get(key K) (V, error) {
+func (s *sharded[K, V]) Get(key K) (V, bool) {
 	return s.shard(key).Get(key)
 }
 
@@ -372,15 +383,15 @@ func (s *sharded[K, V]) Set(key K, val V, exp Expiration) {
 	s.shard(key).Set(key, val, exp)
 }
 
-func (s *sharded[K, V]) Add(key K, val V, exp Expiration) error {
-	return s.shard(key).Add(key, val, exp)
+func (s *sharded[K, V]) GetOrSet(key K, val V, exp Expiration) (v V, present bool) {
+	return s.shard(key).GetOrSet(key, val, exp)
 }
 
-func (s *sharded[K, V]) Replace(key K, val V, exp Expiration) error {
+func (s *sharded[K, V]) Replace(key K, val V, exp Expiration) bool {
 	return s.shard(key).Replace(key, val, exp)
 }
 
-func (s *sharded[K, V]) Remove(key K) error {
+func (s *sharded[K, V]) Remove(key K) bool {
 	return s.shard(key).Remove(key)
 }
 

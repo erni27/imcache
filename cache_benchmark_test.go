@@ -20,8 +20,8 @@ func BenchmarkGet(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); err != nil {
-			b.Fatalf("Get(_) = %v", err)
+		if _, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); !ok {
+			b.Fatalf("Get(_) = _, %t", ok)
 		}
 	}
 }
@@ -36,8 +36,8 @@ func BenchmarkGet_Concurrent(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			if _, err := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); err != nil {
-				b.Fatalf("Get(_) = %v", err)
+			if _, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); !ok {
+				b.Fatalf("Get(_) = _, %t", ok)
 			}
 		}
 	})
@@ -54,8 +54,8 @@ func BenchmarkGet_Sharded(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				if _, err := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); err != nil {
-					b.Fatalf("Get(_) = %v", err)
+				if _, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); !ok {
+					b.Fatalf("Get(_) = _, %t", ok)
 				}
 			}
 		})
@@ -74,8 +74,8 @@ func BenchmarkGet_Sharded_Concurrent(b *testing.B) {
 			b.ResetTimer()
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
-					if _, err := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); err != nil {
-						b.Fatalf("Get(_) = %v", err)
+					if _, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); !ok {
+						b.Fatalf("Get(_) = _, %t", ok)
 					}
 				}
 			})
@@ -139,18 +139,21 @@ func BenchmarkSet_Sharded_Concurrent(b *testing.B) {
 	}
 }
 
-func BenchmarkAdd(b *testing.B) {
+var val int
+var ok bool
+
+func BenchmarkGetOrSet(b *testing.B) {
 	c := New[string, int]()
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		i := rand.Intn(b.N)
-		_ = c.Add(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
+		val, ok = c.GetOrSet(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
 	}
 }
 
-func BenchmarkAdd_Concurrent(b *testing.B) {
+func BenchmarkGetOrSet_Concurrent(b *testing.B) {
 	c := New[string, int]()
 
 	b.ReportAllocs()
@@ -158,12 +161,12 @@ func BenchmarkAdd_Concurrent(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			i := rand.Intn(b.N)
-			_ = c.Add(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
+			val, ok = c.GetOrSet(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
 		}
 	})
 }
 
-func BenchmarkAdd_Sharded(b *testing.B) {
+func BenchmarkGetOrSet_Sharded(b *testing.B) {
 	for _, n := range []int{2, 4, 8, 16, 32, 64, 128, 256, 512, 1024} {
 		b.Run(fmt.Sprintf("%d shards", n), func(b *testing.B) {
 			c := NewSharded[string, int](n, DefaultStringHasher64{})
@@ -172,13 +175,13 @@ func BenchmarkAdd_Sharded(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				i := rand.Intn(b.N)
-				_ = c.Add(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
+				val, ok = c.GetOrSet(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
 			}
 		})
 	}
 }
 
-func BenchmarkAdd_Sharded_Concurrent(b *testing.B) {
+func BenchmarkGetOrSet_Sharded_Concurrent(b *testing.B) {
 	for _, n := range []int{2, 4, 8, 16, 32, 64, 128, 256, 512, 1024} {
 		b.Run(fmt.Sprintf("%d shards", n), func(b *testing.B) {
 			c := NewSharded[string, int](n, DefaultStringHasher64{})
@@ -188,7 +191,7 @@ func BenchmarkAdd_Sharded_Concurrent(b *testing.B) {
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
 					i := rand.Intn(b.N)
-					_ = c.Add(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
+					val, ok = c.GetOrSet(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
 				}
 			})
 		})
@@ -205,8 +208,8 @@ func BenchmarkReplace(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		i := rand.Intn(b.N)
-		if err := c.Replace(fmt.Sprintf("key-%d", i), i, WithNoExpiration()); err != nil {
-			b.Fatalf("Replace(_, _, _) = %v", err)
+		if ok := c.Replace(fmt.Sprintf("key-%d", i), i, WithNoExpiration()); !ok {
+			b.Fatalf("Replace(_, _, _) = %t", ok)
 		}
 	}
 }
@@ -220,8 +223,8 @@ func BenchmarkRemove(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if err := c.Remove(fmt.Sprintf("key-%d", i)); err != nil {
-			b.Fatalf("Remove(_) = %v", err)
+		if ok := c.Remove(fmt.Sprintf("key-%d", i)); !ok {
+			b.Fatalf("Remove(_) = %t", ok)
 		}
 	}
 }
