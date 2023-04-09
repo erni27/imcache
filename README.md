@@ -52,7 +52,7 @@ c.Set(2, "two", imcache.WithSlidingExpiration(time.Second))
 c.Set(3, "three", imcache.WithSlidingExpiration(time.Second))
 ```
 
-If you want to use default expiration time for the given cache instance, you can use the `WithDefaultExpiration` `Expiration` option. By default the default expiration time is set to no expiration. You can set the default expiration time when creating a new Cache instance.
+If you want to use default expiration time for the given cache instance, you can use the `WithDefaultExpiration` `Expiration` option. By default the default expiration time is set to no expiration. You can set the default expiration time when creating a new `Cache` instance.
 
 ```go
 // Create a new Cache instance with default absolute expiration time equal to 1 second.
