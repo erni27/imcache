@@ -1,7 +1,6 @@
 package imcache
 
 import (
-	"errors"
 	"math/rand"
 	"strconv"
 	"sync"
@@ -17,11 +16,11 @@ func init() {
 
 func TestCache_Get(t *testing.T) {
 	tests := []struct {
-		name    string
-		c       func() Cache[string, string]
-		key     string
-		want    string
-		wantErr error
+		name string
+		c    func() Cache[string, string]
+		key  string
+		want string
+		ok   bool
 	}{
 		{
 			name: "success",
@@ -32,6 +31,7 @@ func TestCache_Get(t *testing.T) {
 			},
 			key:  "foo",
 			want: "bar",
+			ok:   true,
 		},
 		{
 			name: "not found",
@@ -39,8 +39,7 @@ func TestCache_Get(t *testing.T) {
 				c := New[string, string]()
 				return c
 			},
-			key:     "foo",
-			wantErr: ErrNotFound,
+			key: "foo",
 		},
 		{
 			name: "entry expired",
@@ -50,8 +49,7 @@ func TestCache_Get(t *testing.T) {
 				<-time.After(time.Nanosecond)
 				return c
 			},
-			key:     "foo",
-			wantErr: ErrNotFound,
+			key: "foo",
 		},
 		{
 			name: "success - sharded",
@@ -62,6 +60,7 @@ func TestCache_Get(t *testing.T) {
 			},
 			key:  "foo",
 			want: "bar",
+			ok:   true,
 		},
 		{
 			name: "not found - sharded",
@@ -69,8 +68,7 @@ func TestCache_Get(t *testing.T) {
 				c := NewSharded[string, string](4, DefaultStringHasher64{})
 				return c
 			},
-			key:     "foo",
-			wantErr: ErrNotFound,
+			key: "foo",
 		},
 		{
 			name: "entry expired - sharded",
@@ -80,17 +78,16 @@ func TestCache_Get(t *testing.T) {
 				<-time.After(time.Nanosecond)
 				return c
 			},
-			key:     "foo",
-			wantErr: ErrNotFound,
+			key: "foo",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := tt.c()
-			got, err := c.Get(tt.key)
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("Cache.Get(%s) = _, %v, want _, %v", tt.key, err, tt.wantErr)
+			got, ok := c.Get(tt.key)
+			if ok != tt.ok {
+				t.Fatalf("Cache.Get(%s) = _, %t, want _, %t", tt.key, ok, tt.ok)
 			}
 			if !cmp.Equal(got, tt.want) {
 				t.Errorf("Cache.Get(%s) = %v, _ want %v, _", tt.key, got, tt.want)
@@ -117,20 +114,18 @@ func TestCache_Get_SlidingExpiration(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := tt.c
-			if err := c.Add("foo", "foo", WithSlidingExpiration(500*time.Millisecond)); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
+			c.Set("foo", "foo", WithSlidingExpiration(500*time.Millisecond))
+			<-time.After(300 * time.Millisecond)
+			if _, ok := c.Get("foo"); !ok {
+				t.Errorf("Cache.Get(%s) = _, %t, want _, true", "foo", ok)
 			}
 			<-time.After(300 * time.Millisecond)
-			if _, err := c.Get("foo"); err != nil {
-				t.Errorf("Cache.Get(%s) = _, %v, want _, nil", "foo", err)
-			}
-			<-time.After(300 * time.Millisecond)
-			if _, err := c.Get("foo"); err != nil {
-				t.Errorf("Cache.Get(%s) = _, %v, want _, nil", "foo", err)
+			if _, ok := c.Get("foo"); !ok {
+				t.Errorf("Cache.Get(%s) = _, %t, want _, true", "foo", ok)
 			}
 			<-time.After(500 * time.Millisecond)
-			if _, err := c.Get("foo"); !errors.Is(err, ErrNotFound) {
-				t.Errorf("Cache.Get(%s) = _, %v, want _, %v", "foo", err, ErrNotFound)
+			if _, ok := c.Get("foo"); ok {
+				t.Errorf("Cache.Get(%s) = _, %t, want _, false", "foo", ok)
 			}
 		})
 	}
@@ -209,9 +204,9 @@ func TestCache_Set(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			c := tt.c()
 			c.Set(tt.key, tt.val, WithNoExpiration())
-			got, err := c.Get(tt.key)
-			if err != nil {
-				t.Fatalf("Cache.Get(%s) = _, %v, want _, nil", tt.key, err)
+			got, ok := c.Get(tt.key)
+			if !ok {
+				t.Fatalf("Cache.Get(%s) = _, %t, want _, true", tt.key, ok)
 			}
 			if !cmp.Equal(got, tt.val) {
 				t.Errorf("Cache.Get(%s) = %v, want %v", tt.key, got, tt.val)
@@ -220,13 +215,14 @@ func TestCache_Set(t *testing.T) {
 	}
 }
 
-func TestCache_Add(t *testing.T) {
+func TestCache_GetOrSet(t *testing.T) {
 	tests := []struct {
 		name    string
 		c       func() Cache[string, string]
 		key     string
 		val     string
-		wantErr error
+		want    string
+		present bool
 	}{
 		{
 			name: "add new entry",
@@ -234,8 +230,9 @@ func TestCache_Add(t *testing.T) {
 				c := New[string, string]()
 				return c
 			},
-			key: "foo",
-			val: "bar",
+			key:  "foo",
+			val:  "bar",
+			want: "bar",
 		},
 		{
 			name: "add new entry if old expired",
@@ -245,11 +242,12 @@ func TestCache_Add(t *testing.T) {
 				<-time.After(time.Nanosecond)
 				return c
 			},
-			key: "foo",
-			val: "bar",
+			key:  "foo",
+			val:  "bar",
+			want: "bar",
 		},
 		{
-			name: "replace existing entry",
+			name: "get existing entry",
 			c: func() Cache[string, string] {
 				c := New[string, string]()
 				c.Set("foo", "foo", WithNoExpiration())
@@ -257,7 +255,8 @@ func TestCache_Add(t *testing.T) {
 			},
 			key:     "foo",
 			val:     "bar",
-			wantErr: ErrAlreadyExists,
+			want:    "foo",
+			present: true,
 		},
 		{
 			name: "add new entry - sharded",
@@ -265,8 +264,9 @@ func TestCache_Add(t *testing.T) {
 				c := NewSharded[string, string](2, DefaultStringHasher64{})
 				return c
 			},
-			key: "foo",
-			val: "bar",
+			key:  "foo",
+			val:  "bar",
+			want: "bar",
 		},
 		{
 			name: "add new entry if old expired - sharded",
@@ -276,11 +276,12 @@ func TestCache_Add(t *testing.T) {
 				<-time.After(time.Nanosecond)
 				return c
 			},
-			key: "foo",
-			val: "bar",
+			key:  "foo",
+			val:  "bar",
+			want: "bar",
 		},
 		{
-			name: "replace existing entry - sharded",
+			name: "get existing entry - sharded",
 			c: func() Cache[string, string] {
 				c := NewSharded[string, string](8, DefaultStringHasher64{})
 				c.Set("foo", "foo", WithNoExpiration())
@@ -288,25 +289,20 @@ func TestCache_Add(t *testing.T) {
 			},
 			key:     "foo",
 			val:     "bar",
-			wantErr: ErrAlreadyExists,
+			want:    "foo",
+			present: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := tt.c()
-			if err := c.Add(tt.key, tt.val, WithDefaultExpiration()); !errors.Is(err, tt.wantErr) {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want %v", tt.key, err, tt.wantErr)
+			got, ok := c.GetOrSet(tt.key, tt.val, WithDefaultExpiration())
+			if ok != tt.present {
+				t.Errorf("Cache.GetOrSet(%s) = _, %t, want _, %t", tt.key, ok, tt.present)
 			}
-			if tt.wantErr != nil {
-				return
-			}
-			got, err := c.Get(tt.key)
-			if err != nil {
-				t.Fatalf("Cache.Get(%s) = _, %v, want _, nil", tt.key, err)
-			}
-			if !cmp.Equal(got, tt.val) {
-				t.Errorf("Cache.Get(%s) = %v, want %v", tt.key, got, tt.val)
+			if !cmp.Equal(got, tt.want) {
+				t.Errorf("Cache.GetOrSet(%s) = %v, _, want %v, _", tt.key, got, tt.want)
 			}
 		})
 	}
@@ -318,7 +314,7 @@ func TestCache_Replace(t *testing.T) {
 		c       func() Cache[string, string]
 		key     string
 		val     string
-		wantErr error
+		present bool
 	}{
 		{
 			name: "success",
@@ -327,8 +323,9 @@ func TestCache_Replace(t *testing.T) {
 				c.Set("foo", "foo", WithNoExpiration())
 				return c
 			},
-			key: "foo",
-			val: "bar",
+			key:     "foo",
+			val:     "bar",
+			present: true,
 		},
 		{
 			name: "entry expired",
@@ -338,9 +335,8 @@ func TestCache_Replace(t *testing.T) {
 				<-time.After(time.Nanosecond)
 				return c
 			},
-			key:     "foo",
-			val:     "bar",
-			wantErr: ErrNotFound,
+			key: "foo",
+			val: "bar",
 		},
 		{
 			name: "entry doesn't exist",
@@ -348,9 +344,8 @@ func TestCache_Replace(t *testing.T) {
 				c := New[string, string]()
 				return c
 			},
-			key:     "foo",
-			val:     "bar",
-			wantErr: ErrNotFound,
+			key: "foo",
+			val: "bar",
 		},
 		{
 			name: "success - sharded",
@@ -359,8 +354,9 @@ func TestCache_Replace(t *testing.T) {
 				c.Set("foo", "foo", WithNoExpiration())
 				return c
 			},
-			key: "foo",
-			val: "bar",
+			key:     "foo",
+			val:     "bar",
+			present: true,
 		},
 		{
 			name: "entry expired - sharded",
@@ -370,9 +366,8 @@ func TestCache_Replace(t *testing.T) {
 				<-time.After(time.Nanosecond)
 				return c
 			},
-			key:     "foo",
-			val:     "bar",
-			wantErr: ErrNotFound,
+			key: "foo",
+			val: "bar",
 		},
 		{
 			name: "entry doesn't exist - sharded",
@@ -380,27 +375,26 @@ func TestCache_Replace(t *testing.T) {
 				c := NewSharded[string, string](8, DefaultStringHasher64{})
 				return c
 			},
-			key:     "foo",
-			val:     "bar",
-			wantErr: ErrNotFound,
+			key: "foo",
+			val: "bar",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := tt.c()
-			if err := c.Replace(tt.key, tt.val, WithDefaultExpiration()); !errors.Is(err, tt.wantErr) {
-				t.Fatalf("Cache.Replace(%s, _, _) = %v, want %v", tt.key, err, tt.wantErr)
+			if ok := c.Replace(tt.key, tt.val, WithDefaultExpiration()); ok != tt.present {
+				t.Fatalf("Cache.Replace(%s, _, _) = %t, want %t", tt.key, ok, tt.present)
 			}
-			if tt.wantErr != nil {
+			got, ok := c.Get(tt.key)
+			if ok != tt.present {
+				t.Fatalf("Cache.Get(%s) = _, %t, want _, %t", tt.key, ok, tt.present)
+			}
+			if !ok {
 				return
 			}
-			got, err := c.Get(tt.key)
-			if err != nil {
-				t.Fatalf("Cache.Get(%s) = _, %v, want _, nil", tt.key, err)
-			}
 			if !cmp.Equal(got, tt.val) {
-				t.Errorf("Cache.Get(%s) = %v, want %v", tt.key, got, tt.val)
+				t.Errorf("Cache.Get(%s) = %v, _, want %v, _", tt.key, got, tt.val)
 			}
 		})
 	}
@@ -411,7 +405,7 @@ func TestCache_Remove(t *testing.T) {
 		name    string
 		c       func() Cache[string, string]
 		key     string
-		wantErr error
+		present bool
 	}{
 		{
 			name: "success",
@@ -420,7 +414,8 @@ func TestCache_Remove(t *testing.T) {
 				c.Set("foo", "foo", WithNoExpiration())
 				return c
 			},
-			key: "foo",
+			key:     "foo",
+			present: true,
 		},
 		{
 			name: "entry doesn't exist",
@@ -429,8 +424,7 @@ func TestCache_Remove(t *testing.T) {
 				c.Set("foo", "foo", WithNoExpiration())
 				return c
 			},
-			key:     "bar",
-			wantErr: ErrNotFound,
+			key: "bar",
 		},
 		{
 			name: "entry expired",
@@ -440,8 +434,7 @@ func TestCache_Remove(t *testing.T) {
 				<-time.After(time.Nanosecond)
 				return c
 			},
-			key:     "foo",
-			wantErr: ErrNotFound,
+			key: "foo",
 		},
 		{
 			name: "success - sharded",
@@ -450,7 +443,8 @@ func TestCache_Remove(t *testing.T) {
 				c.Set("foo", "foo", WithExpirationDate(time.Now().Add(time.Minute)))
 				return c
 			},
-			key: "foo",
+			key:     "foo",
+			present: true,
 		},
 		{
 			name: "entry doesn't exist - sharded",
@@ -459,8 +453,7 @@ func TestCache_Remove(t *testing.T) {
 				c.Set("foo", "foo", WithNoExpiration())
 				return c
 			},
-			key:     "bar",
-			wantErr: ErrNotFound,
+			key: "bar",
 		},
 		{
 			name: "entry expired - sharded",
@@ -470,19 +463,18 @@ func TestCache_Remove(t *testing.T) {
 				<-time.After(time.Nanosecond)
 				return c
 			},
-			key:     "foo",
-			wantErr: ErrNotFound,
+			key: "foo",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := tt.c()
-			if err := c.Remove(tt.key); !errors.Is(err, tt.wantErr) {
-				t.Fatalf("Cache.Remove(%s) = %v, want %v", tt.key, err, tt.wantErr)
+			if ok := c.Remove(tt.key); ok != tt.present {
+				t.Fatalf("Cache.Remove(%s) = %t, want %t", tt.key, ok, tt.present)
 			}
-			if _, err := c.Get(tt.key); !errors.Is(err, ErrNotFound) {
-				t.Fatalf("Cache.Get(%s) = _, %v, want _, %v", tt.key, err, ErrNotFound)
+			if _, ok := c.Get(tt.key); ok {
+				t.Fatalf("Cache.Get(%s) = _, %t, want _, false", tt.key, ok)
 			}
 		})
 	}
@@ -506,19 +498,15 @@ func TestCache_RemoveAll(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := tt.c
-			if err := c.Add("foo", "foo", WithNoExpiration()); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
-			}
-			if err := c.Add("bar", "bar", WithExpiration(time.Nanosecond)); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "bar", err)
-			}
+			c.Set("foo", "foo", WithNoExpiration())
+			c.Set("bar", "bar", WithExpiration(time.Nanosecond))
 			<-time.After(time.Nanosecond)
 			c.RemoveAll()
-			if _, err := c.Get("foo"); !errors.Is(err, ErrNotFound) {
-				t.Errorf("Cache.Get(%s) = _, %v, want _, %v", "foo", err, ErrNotFound)
+			if _, ok := c.Get("foo"); ok {
+				t.Errorf("Cache.Get(%s) = _, %t, want _, false", "foo", ok)
 			}
-			if _, err := c.Get("bar"); !errors.Is(err, ErrNotFound) {
-				t.Errorf("Cache.Get(%s) = _, %v, want _, %v", "bar", err, ErrNotFound)
+			if _, ok := c.Get("bar"); ok {
+				t.Errorf("Cache.Get(%s) = _, %t, want _, false", "bar", ok)
 			}
 		})
 	}
@@ -542,19 +530,15 @@ func TestCache_RemoveStale(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := tt.c
-			if err := c.Add("foo", "foo", WithNoExpiration()); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
-			}
-			if err := c.Add("bar", "bar", WithExpiration(time.Nanosecond)); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "bar", err)
-			}
+			c.Set("foo", "foo", WithNoExpiration())
+			c.Set("bar", "bar", WithExpiration(time.Nanosecond))
 			<-time.After(time.Nanosecond)
 			c.RemoveStale()
-			if _, err := c.Get("foo"); err != nil {
-				t.Errorf("Cache.Get(%s) = _, %v, want _, nil", "foo", err)
+			if _, ok := c.Get("foo"); !ok {
+				t.Errorf("Cache.Get(%s) = _, %t, want _, true", "foo", ok)
 			}
-			if _, err := c.Get("bar"); !errors.Is(err, ErrNotFound) {
-				t.Errorf("Cache.Get(%s) = _, %v, want _, %v", "bar", err, ErrNotFound)
+			if _, ok := c.Get("bar"); ok {
+				t.Errorf("Cache.Get(%s) = _, %t, want _, false", "bar", ok)
 			}
 		})
 	}
@@ -578,15 +562,9 @@ func TestCache_GetAll(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := tt.c
-			if err := c.Add("foo", "foo", WithNoExpiration()); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
-			}
-			if err := c.Add("foobar", "foobar", WithNoExpiration()); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
-			}
-			if err := c.Add("bar", "bar", WithExpiration(time.Nanosecond)); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "bar", err)
-			}
+			c.Set("foo", "foo", WithNoExpiration())
+			c.Set("foobar", "foobar", WithNoExpiration())
+			c.Set("bar", "bar", WithExpiration(time.Nanosecond))
 			<-time.After(time.Nanosecond)
 			got := c.GetAll()
 			want := map[string]string{
@@ -618,12 +596,8 @@ func TestCache_GetAll_SlidingExpiration(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := tt.c
-			if err := c.Add("foo", "foo", WithSlidingExpiration(500*time.Millisecond)); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
-			}
-			if err := c.Add("bar", "bar", WithSlidingExpiration(500*time.Millisecond)); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
-			}
+			c.Set("foo", "foo", WithSlidingExpiration(500*time.Millisecond))
+			c.Set("bar", "bar", WithSlidingExpiration(500*time.Millisecond))
 			<-time.After(300 * time.Millisecond)
 			want := map[string]string{
 				"foo": "foo",
@@ -665,9 +639,7 @@ func TestCache_Len(t *testing.T) {
 			c := tt.c
 			n := 1000 + rand.Intn(1000)
 			for i := 0; i < n; i++ {
-				if err := c.Add(strconv.Itoa(i), i, WithNoExpiration()); err != nil {
-					t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", strconv.Itoa(i), err)
-				}
+				c.Set(strconv.Itoa(i), i, WithNoExpiration())
 			}
 			if got := c.Len(); got != n {
 				t.Errorf("Cache.Len() = %d, want %d", got, n)
@@ -694,12 +666,10 @@ func TestCache_DefaultExpiration(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := tt.c
-			if err := c.Add("foo", "foo", WithDefaultExpiration()); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
-			}
+			c.Set("foo", "foo", WithDefaultExpiration())
 			<-time.After(500 * time.Millisecond)
-			if _, err := c.Get("foo"); !errors.Is(err, ErrNotFound) {
-				t.Errorf("Cache.Get(%s) = _, %v, want _, %v", "foo", err, ErrNotFound)
+			if _, ok := c.Get("foo"); ok {
+				t.Errorf("Cache.Get(%s) = _, %t, want _, false", "foo", ok)
 			}
 		})
 	}
@@ -723,20 +693,18 @@ func TestCache_DefaultSlidingExpiration(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := tt.c
-			if err := c.Add("foo", "foo", WithDefaultExpiration()); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
+			c.Set("foo", "foo", WithDefaultExpiration())
+			<-time.After(300 * time.Millisecond)
+			if _, ok := c.Get("foo"); !ok {
+				t.Errorf("Cache.Get(%s) = _, %t, want _, true", "foo", ok)
 			}
 			<-time.After(300 * time.Millisecond)
-			if _, err := c.Get("foo"); err != nil {
-				t.Errorf("Cache.Get(%s) = _, %v, want _, nil", "foo", err)
-			}
-			<-time.After(300 * time.Millisecond)
-			if _, err := c.Get("foo"); err != nil {
-				t.Errorf("Cache.Get(%s) = _, %v, want _, nil", "foo", err)
+			if _, ok := c.Get("foo"); !ok {
+				t.Errorf("Cache.Get(%s) = _, %t, want _, true", "foo", ok)
 			}
 			<-time.After(500 * time.Millisecond)
-			if _, err := c.Get("foo"); !errors.Is(err, ErrNotFound) {
-				t.Errorf("Cache.Get(%s) = _, %v, want _, %v", "foo", err, ErrNotFound)
+			if _, ok := c.Get("foo"); ok {
+				t.Errorf("Cache.Get(%s) = _, %t, want _, false", "foo", ok)
 			}
 		})
 	}
@@ -801,12 +769,10 @@ func TestCache_Get_EvictionCallback(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			defer evictioncMock.Reset()
 			c := tt.c
-			if err := c.Add("foo", "foo", WithExpiration(time.Nanosecond)); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
-			}
+			c.Set("foo", "foo", WithExpiration(time.Nanosecond))
 			<-time.After(time.Nanosecond)
-			if _, err := c.Get("foo"); !errors.Is(err, ErrNotFound) {
-				t.Errorf("Cache.Get(%s) = _, %v, want _, %v", "foo", err, ErrNotFound)
+			if _, ok := c.Get("foo"); ok {
+				t.Errorf("Cache.Get(%s) = _, %t, want _, false", "foo", ok)
 			}
 			if !evictioncMock.HasBeenCalledWith("foo", "foo", EvictionReasonExpired) {
 				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "foo", "foo", EvictionReasonExpired)
@@ -836,12 +802,8 @@ func TestCache_Set_EvictionCallback(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			defer evictioncMock.Reset()
 			c := tt.c
-			if err := c.Add("foo", "foo", WithExpiration(time.Nanosecond)); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
-			}
-			if err := c.Add("bar", "bar", WithNoExpiration()); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "bar", err)
-			}
+			c.Set("foo", "foo", WithExpiration(time.Nanosecond))
+			c.Set("bar", "bar", WithNoExpiration())
 			<-time.After(time.Nanosecond)
 			c.Set("foo", "bar", WithNoExpiration())
 			if !evictioncMock.HasBeenCalledWith("foo", "foo", EvictionReasonExpired) {
@@ -855,7 +817,7 @@ func TestCache_Set_EvictionCallback(t *testing.T) {
 	}
 }
 
-func TestCache_Add_EvictionCallback(t *testing.T) {
+func TestCache_GetOrSet_EvictionCallback(t *testing.T) {
 	evictioncMock := &evictionCallbackMock{}
 
 	tests := []struct {
@@ -876,12 +838,12 @@ func TestCache_Add_EvictionCallback(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			defer evictioncMock.Reset()
 			c := New(WithEvictionCallbackOption(evictioncMock.Callback))
-			if err := c.Add("foo", "foo", WithExpiration(time.Nanosecond)); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
+			if _, ok := c.GetOrSet("foo", "foo", WithExpiration(time.Nanosecond)); ok {
+				t.Errorf("Cache.GetOrSet(%s, _, _) = _, %t, want _, false", "foo", ok)
 			}
 			<-time.After(time.Nanosecond)
-			if err := c.Add("foo", "bar", WithNoExpiration()); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
+			if _, ok := c.GetOrSet("foo", "foo", WithExpiration(time.Nanosecond)); ok {
+				t.Errorf("Cache.GetOrSet(%s, _, _) = _, %t, want _, false", "foo", ok)
 			}
 			if !evictioncMock.HasBeenCalledWith("foo", "foo", EvictionReasonExpired) {
 				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "foo", "foo", EvictionReasonExpired)
@@ -911,21 +873,17 @@ func TestCache_Replace_EvictionCallback(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			defer evictioncMock.Reset()
 			c := tt.c
-			if err := c.Add("foo", "foo", WithExpiration(time.Nanosecond)); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
-			}
-			if err := c.Add("bar", "bar", WithNoExpiration()); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "bar", err)
-			}
+			c.Set("foo", "foo", WithExpiration(time.Nanosecond))
+			c.Set("bar", "bar", WithNoExpiration())
 			<-time.After(time.Nanosecond)
-			if err := c.Replace("foo", "bar", WithNoExpiration()); !errors.Is(err, ErrNotFound) {
-				t.Errorf("Cache.Replace(%s, _, _) = %v, want %v", "foo", err, ErrNotFound)
+			if ok := c.Replace("foo", "bar", WithNoExpiration()); ok {
+				t.Errorf("Cache.Replace(%s, _, _) = %t, want false", "foo", ok)
 			}
 			if !evictioncMock.HasBeenCalledWith("foo", "foo", EvictionReasonExpired) {
 				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "foo", "foo", EvictionReasonExpired)
 			}
-			if err := c.Replace("bar", "foo", WithNoExpiration()); err != nil {
-				t.Errorf("Cache.Replace(%s, _, _) = %v, want nil", "bar", err)
+			if ok := c.Replace("bar", "foo", WithNoExpiration()); !ok {
+				t.Errorf("Cache.Replace(%s, _, _) = %t, want true", "bar", ok)
 			}
 			if !evictioncMock.HasBeenCalledWith("bar", "bar", EvictionReasonReplaced) {
 				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "bar", "bar", EvictionReasonReplaced)
@@ -955,21 +913,17 @@ func TestCache_Remove_EvictionCallback(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			defer evictioncMock.Reset()
 			c := New(WithEvictionCallbackOption(evictioncMock.Callback))
-			if err := c.Add("foo", "foo", WithExpiration(time.Nanosecond)); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
-			}
-			if err := c.Add("bar", "bar", WithNoExpiration()); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "bar", err)
-			}
+			c.Set("foo", "foo", WithExpiration(time.Nanosecond))
+			c.Set("bar", "bar", WithNoExpiration())
 			<-time.After(time.Nanosecond)
-			if err := c.Remove("foo"); !errors.Is(err, ErrNotFound) {
-				t.Errorf("Cache.Remove(%s) = %v, want %v", "foo", err, ErrNotFound)
+			if ok := c.Remove("foo"); ok {
+				t.Errorf("Cache.Remove(%s) = %t, want false", "foo", ok)
 			}
 			if !evictioncMock.HasBeenCalledWith("foo", "foo", EvictionReasonExpired) {
 				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "foo", "foo", EvictionReasonExpired)
 			}
-			if err := c.Remove("bar"); err != nil {
-				t.Errorf("Cache.Remove(%s) = %v, want nil", "bar", err)
+			if ok := c.Remove("bar"); !ok {
+				t.Errorf("Cache.Remove(%s) = %t, want true", "bar", ok)
 			}
 			if !evictioncMock.HasBeenCalledWith("bar", "bar", EvictionReasonRemoved) {
 				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "bar", "bar", EvictionReasonReplaced)
@@ -999,12 +953,8 @@ func TestCache_RemoveAll_EvictionCallback(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			defer evictioncMock.Reset()
 			c := New(WithEvictionCallbackOption(evictioncMock.Callback))
-			if err := c.Add("foo", "foo", WithExpiration(time.Nanosecond)); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
-			}
-			if err := c.Add("bar", "bar", WithNoExpiration()); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "bar", err)
-			}
+			c.Set("foo", "foo", WithExpiration(time.Nanosecond))
+			c.Set("bar", "bar", WithNoExpiration())
 			<-time.After(time.Nanosecond)
 			c.RemoveAll()
 			if !evictioncMock.HasBeenCalledWith("foo", "foo", EvictionReasonExpired) {
@@ -1038,17 +988,10 @@ func TestCache_RemoveStale_EvictionCallback(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			defer evictioncMock.Reset()
 			c := New(WithEvictionCallbackOption(evictioncMock.Callback))
-			if err := c.Add("foo", "foo", WithExpiration(time.Nanosecond)); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
-			}
-			if err := c.Add("bar", "bar", WithNoExpiration()); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "bar", err)
-			}
+			c.Set("foo", "foo", WithExpiration(time.Nanosecond))
+			c.Set("bar", "bar", WithNoExpiration())
 			<-time.After(time.Nanosecond)
 			c.RemoveStale()
-			if _, err := c.Get("foo"); !errors.Is(err, ErrNotFound) {
-				t.Errorf("Cache.Get(%s) = _, %v, want _, %v", "foo", err, ErrNotFound)
-			}
 			if !evictioncMock.HasBeenCalledWith("foo", "foo", EvictionReasonExpired) {
 				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "foo", "foo", EvictionReasonExpired)
 			}
@@ -1077,15 +1020,9 @@ func TestCache_GetAll_EvictionCallback(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			defer evictioncMock.Reset()
 			c := tt.c
-			if err := c.Add("foo", "foo", WithNoExpiration()); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
-			}
-			if err := c.Add("foobar", "foobar", WithSlidingExpiration(time.Second)); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
-			}
-			if err := c.Add("bar", "bar", WithExpiration(time.Nanosecond)); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "bar", err)
-			}
+			c.Set("foo", "foo", WithNoExpiration())
+			c.Set("foobar", "foobar", WithSlidingExpiration(time.Second))
+			c.Set("bar", "bar", WithExpiration(time.Nanosecond))
 			<-time.After(time.Nanosecond)
 			got := c.GetAll()
 			want := map[string]interface{}{
@@ -1169,15 +1106,9 @@ func TestCache_StartCleaner(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			defer evictioncMock.Reset()
 			c := tt.c
-			if err := c.Add("foo", "foo", WithExpiration(time.Millisecond)); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
-			}
-			if err := c.Add("bar", "bar", WithExpiration(time.Millisecond)); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "bar", err)
-			}
-			if err := c.Add("foobar", "foobar", WithExpiration(20*time.Millisecond)); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "bar", err)
-			}
+			c.Set("foo", "foo", WithExpiration(time.Millisecond))
+			c.Set("bar", "bar", WithExpiration(time.Millisecond))
+			c.Set("foobar", "foobar", WithExpiration(20*time.Millisecond))
 			c.StartCleaner(2 * time.Millisecond)
 			// Subsequent calls to StartCleaner should not start a new cleaner.
 			c.StartCleaner(5 * time.Nanosecond)
@@ -1221,15 +1152,9 @@ func TestCache_StopCleaner(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			defer evictioncMock.Reset()
 			c := tt.c
-			if err := c.Add("foo", "foo", WithExpiration(time.Millisecond)); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "foo", err)
-			}
-			if err := c.Add("bar", "bar", WithExpiration(time.Millisecond)); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "bar", err)
-			}
-			if err := c.Add("foobar", "foobar", WithExpiration(20*time.Millisecond)); err != nil {
-				t.Fatalf("Cache.Add(%s, _, _) = %v, want nil", "bar", err)
-			}
+			c.Set("foo", "foo", WithExpiration(time.Millisecond))
+			c.Set("bar", "bar", WithExpiration(time.Millisecond))
+			c.Set("foobar", "foobar", WithExpiration(20*time.Millisecond))
 			c.StartCleaner(2 * time.Millisecond)
 			<-time.After(3 * time.Millisecond)
 			if !evictioncMock.HasBeenCalledWith("foo", "foo", EvictionReasonExpired) {
