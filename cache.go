@@ -85,10 +85,11 @@ type Cache[K comparable, V any] interface {
 	// StartCleaner starts a cleaner that periodically removes expired entries.
 	// A cleaner runs in a separate goroutine.
 	// It's a NOP method if the cleaner is already running.
-	// It panics if the interval is less than or equal to zero.
+	// It returns an error if the cleaner is already running
+	// or if the interval is less than or equal to zero.
 	//
 	// The cleaner can be stopped by calling StopCleaner method.
-	StartCleaner(interval time.Duration)
+	StartCleaner(interval time.Duration) error
 	// StopCleaner stops the cleaner.
 	// It is a blocking method that waits for the cleaner to stop.
 	// It's a NOP method if the cleaner is not running.
@@ -372,8 +373,8 @@ func (s *shard[K, V]) Len() int {
 	return n
 }
 
-func (s *shard[K, V]) StartCleaner(interval time.Duration) {
-	s.cleaner.start(s, interval)
+func (s *shard[K, V]) StartCleaner(interval time.Duration) error {
+	return s.cleaner.start(s, interval)
 }
 
 func (s *shard[K, V]) StopCleaner() {
@@ -483,8 +484,8 @@ func (s *sharded[K, V]) Len() int {
 	return n
 }
 
-func (s *sharded[K, V]) StartCleaner(interval time.Duration) {
-	s.cleaner.start(s, interval)
+func (s *sharded[K, V]) StartCleaner(interval time.Duration) error {
+	return s.cleaner.start(s, interval)
 }
 
 func (s *sharded[K, V]) StopCleaner() {

@@ -75,7 +75,8 @@ It is possible to use the `Cleaner` to periodically remove expired entries from 
 ```go
 c := imcache.New[string, string]()
 // Start Cleaner which will remove expired entries every 5 minutes.
-c.StartCleaner(5 * time.Minute)
+_ = c.StartCleaner(5 * time.Minute)
+defer c.StopCleaner()
 ```
 
 To be notified when an entry is evicted from the cache, you can use the `EvictionCallback`. It's a function that accepts the key and value of the evicted entry along with the reason why the entry was evicted. `EvictionCallback` can be configured when creating a new `Cache` instance.

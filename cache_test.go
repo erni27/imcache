@@ -1192,34 +1192,6 @@ func TestNewSharded_NilHasher(t *testing.T) {
 	_ = NewSharded[string, string](2, nil)
 }
 
-func TestCache_StartCleaner_InvalidInterval(t *testing.T) {
-	tests := []struct {
-		name string
-		c    Cache[string, string]
-	}{
-		{
-			name: "not sharded",
-			c:    New[string, string](),
-		},
-		{
-			name: "sharded",
-			c:    NewSharded[string, string](8, DefaultStringHasher64{}),
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			c := New[string, string]()
-			defer func() {
-				if r := recover(); r == nil {
-					t.Errorf("Cache.StartCleaner(-1) did not panic")
-				}
-			}()
-			c.StartCleaner(-1)
-		})
-	}
-}
-
 func TestCache_StartCleaner(t *testing.T) {
 	evictioncMock := &evictionCallbackMock{}
 
@@ -1244,10 +1216,26 @@ func TestCache_StartCleaner(t *testing.T) {
 			c.Set("foo", "foo", WithExpiration(time.Millisecond))
 			c.Set("bar", "bar", WithExpiration(time.Millisecond))
 			c.Set("foobar", "foobar", WithExpiration(100*time.Millisecond))
-			c.StartCleaner(20 * time.Millisecond)
-			// Subsequent calls to StartCleaner should not start a new cleaner.
-			c.StartCleaner(5 * time.Nanosecond)
-			c.StartCleaner(7 * time.Millisecond)
+			// StartCleaner should return an error if the interval is equal
+			// or less than 0.
+			if err := c.StartCleaner(0); err == nil {
+				t.Fatalf("Cache.StartCleaner(_) = nil, want error")
+			}
+			if err := c.StartCleaner(-10); err == nil {
+				t.Fatalf("Cache.StartCleaner(_) = nil, want error")
+			}
+			// Valid interval should start a cleaner.
+			if err := c.StartCleaner(20 * time.Millisecond); err != nil {
+				t.Fatalf("Cache.StartCleaner(_) = %v, want nil", err)
+			}
+			// Subsequent calls to StartCleaner should not start a new cleaner
+			// and should return an error.
+			if err := c.StartCleaner(5 * time.Nanosecond); err == nil {
+				t.Fatalf("Cache.StartCleaner(_) = nil, want error")
+			}
+			if err := c.StartCleaner(7 * time.Nanosecond); err == nil {
+				t.Fatalf("Cache.StartCleaner(_) = nil, want error")
+			}
 			<-time.After(30 * time.Millisecond)
 			if !evictioncMock.HasBeenCalledWith("foo", "foo", EvictionReasonExpired) {
 				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "foo", "foo", EvictionReasonExpired)
