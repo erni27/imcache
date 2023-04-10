@@ -1,6 +1,7 @@
 package imcache
 
 import (
+	"errors"
 	"sync"
 	"time"
 )
@@ -24,14 +25,14 @@ type cleaner struct {
 	doneCh  chan struct{}
 }
 
-func (c *cleaner) start(r remover, interval time.Duration) {
+func (c *cleaner) start(r remover, interval time.Duration) error {
 	if interval <= 0 {
-		panic("imcache: interval must be greater than 0")
+		return errors.New("imcache: interval must be greater than 0")
 	}
 	c.mu.Lock()
 	if c.running {
 		c.mu.Unlock()
-		return
+		return errors.New("imcache: cleaner already running")
 	}
 	c.running = true
 	c.stopCh = make(chan struct{})
@@ -50,6 +51,7 @@ func (c *cleaner) start(r remover, interval time.Duration) {
 			}
 		}
 	}()
+	return nil
 }
 
 func (c *cleaner) stop() {
