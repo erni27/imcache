@@ -2,12 +2,11 @@ package imcache
 
 import (
 	"math/rand"
+	"reflect"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/google/go-cmp/cmp"
 )
 
 func init() {
@@ -89,7 +88,7 @@ func TestCache_Get(t *testing.T) {
 			if ok != tt.ok {
 				t.Fatalf("Cache.Get(%s) = _, %t, want _, %t", tt.key, ok, tt.ok)
 			}
-			if !cmp.Equal(got, tt.want) {
+			if got != tt.want {
 				t.Errorf("Cache.Get(%s) = %v, _ want %v, _", tt.key, got, tt.want)
 			}
 		})
@@ -208,7 +207,7 @@ func TestCache_Set(t *testing.T) {
 			if !ok {
 				t.Fatalf("Cache.Get(%s) = _, %t, want _, true", tt.key, ok)
 			}
-			if !cmp.Equal(got, tt.val) {
+			if got != tt.val {
 				t.Errorf("Cache.Get(%s) = %v, want %v", tt.key, got, tt.val)
 			}
 		})
@@ -301,7 +300,7 @@ func TestCache_GetOrSet(t *testing.T) {
 			if ok != tt.present {
 				t.Errorf("Cache.GetOrSet(%s) = _, %t, want _, %t", tt.key, ok, tt.present)
 			}
-			if !cmp.Equal(got, tt.want) {
+			if got != tt.want {
 				t.Errorf("Cache.GetOrSet(%s) = %v, _, want %v, _", tt.key, got, tt.want)
 			}
 		})
@@ -393,7 +392,7 @@ func TestCache_Replace(t *testing.T) {
 			if !ok {
 				return
 			}
-			if !cmp.Equal(got, tt.val) {
+			if got != tt.val {
 				t.Errorf("Cache.Get(%s) = %v, _, want %v, _", tt.key, got, tt.val)
 			}
 		})
@@ -488,7 +487,7 @@ func TestCache_ReplaceWithFunc(t *testing.T) {
 			if ok != tt.present {
 				t.Fatalf("Cache.Get(%s) = _, %t, want _, %t", tt.key, ok, tt.present)
 			}
-			if !cmp.Equal(got, tt.val) {
+			if got != tt.val {
 				t.Errorf("Cache.Get(%s) = %v, _, want %v, _", tt.key, got, tt.val)
 			}
 		})
@@ -666,7 +665,7 @@ func TestCache_GetAll(t *testing.T) {
 				"foo":    "foo",
 				"foobar": "foobar",
 			}
-			if !cmp.Equal(got, want) {
+			if !reflect.DeepEqual(got, want) {
 				t.Errorf("Cache.GetAll() = %v, want %v", got, want)
 			}
 		})
@@ -698,16 +697,16 @@ func TestCache_GetAll_SlidingExpiration(t *testing.T) {
 				"foo": "foo",
 				"bar": "bar",
 			}
-			if got := c.GetAll(); !cmp.Equal(got, want) {
+			if got := c.GetAll(); !reflect.DeepEqual(got, want) {
 				t.Errorf("Cache.GetAll() = %v, want %v", got, want)
 			}
 			<-time.After(300 * time.Millisecond)
-			if got := c.GetAll(); !cmp.Equal(got, want) {
+			if got := c.GetAll(); !reflect.DeepEqual(got, want) {
 				t.Errorf("Cache.GetAll() = %v, want %v", got, want)
 			}
 			<-time.After(500 * time.Millisecond)
 			want = map[string]string{}
-			if got := c.GetAll(); !cmp.Equal(got, want) {
+			if got := c.GetAll(); !reflect.DeepEqual(got, want) {
 				t.Errorf("Cache.GetAll() = %v, want %v", got, want)
 			}
 		})
@@ -1164,7 +1163,7 @@ func TestCache_GetAll_EvictionCallback(t *testing.T) {
 				"foo":    "foo",
 				"foobar": "foobar",
 			}
-			if !cmp.Equal(got, want) {
+			if !reflect.DeepEqual(got, want) {
 				t.Errorf("Cache.GetAll() = %v, want %v", got, want)
 			}
 			if !evictioncMock.HasBeenCalledWith("bar", "bar", EvictionReasonExpired) {
