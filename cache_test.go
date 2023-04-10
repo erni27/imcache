@@ -1278,7 +1278,9 @@ func TestCache_StopCleaner(t *testing.T) {
 			c.Set("foo", "foo", WithExpiration(time.Millisecond))
 			c.Set("bar", "bar", WithExpiration(time.Millisecond))
 			c.Set("foobar", "foobar", WithExpiration(100*time.Millisecond))
-			c.StartCleaner(20 * time.Millisecond)
+			if err := c.StartCleaner(20 * time.Millisecond); err != nil {
+				t.Fatalf("Cache.StartCleaner(_) = %v, want nil", err)
+			}
 			<-time.After(30 * time.Millisecond)
 			if !evictioncMock.HasBeenCalledWith("foo", "foo", EvictionReasonExpired) {
 				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "foo", "foo", EvictionReasonExpired)
