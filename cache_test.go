@@ -1301,3 +1301,11 @@ func TestImcache_StopCleaner(t *testing.T) {
 		})
 	}
 }
+
+func TestCache_ZeroValue(t *testing.T) {
+	var c Cache[string, string]
+	c.Set("foo", "bar", WithNoExpiration())
+	if v, ok := c.Get("foo"); !ok || v != "bar" {
+		t.Errorf("want Cache.Get(_) = %s, true, got %s, %t", "bar", v, ok)
+	}
+}
