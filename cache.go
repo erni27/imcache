@@ -139,13 +139,13 @@ func (s *Cache[K, V]) Set(key K, val V, exp Expiration) {
 		s.mu.Unlock()
 		return
 	}
-	entry = s.m[node.key]
+	toevict := s.m[node.key]
 	delete(s.m, node.key)
 	s.mu.Unlock()
-	if entry.HasExpired(now) {
-		s.onEviction(node.key, entry.val, EvictionReasonExpired)
+	if toevict.HasExpired(now) {
+		s.onEviction(node.key, toevict.val, EvictionReasonExpired)
 	} else {
-		s.onEviction(node.key, entry.val, EvictionReasonSizeExceeded)
+		s.onEviction(node.key, toevict.val, EvictionReasonSizeExceeded)
 	}
 }
 
@@ -162,16 +162,46 @@ func (s *Cache[K, V]) GetOrSet(key K, val V, exp Expiration) (V, bool) {
 	// Make sure that the shard is initialized.
 	s.init()
 	current, ok := s.m[key]
-	if ok && !current.HasExpired(now) {
+	if !ok {
+		entry.node = s.queue.AddNew(key)
+		s.m[key] = entry
+		if s.size == 0 || s.len() <= s.size {
+			s.mu.Unlock()
+			return val, false
+		}
+		node := s.queue.Pop()
+		if s.onEviction == nil {
+			delete(s.m, node.key)
+			s.mu.Unlock()
+			return val, false
+		}
+		toevict := s.m[node.key]
+		delete(s.m, node.key)
+		s.mu.Unlock()
+		if toevict.HasExpired(now) {
+			s.onEviction(node.key, toevict.val, EvictionReasonExpired)
+		} else {
+			s.onEviction(node.key, toevict.val, EvictionReasonSizeExceeded)
+		}
+		return val, false
+	}
+	s.queue.Remove(current.node)
+	if !current.HasExpired(now) {
+		if current.HasSlidingExpiration() {
+			current.SlideExpiration(now)
+			s.m[key] = current
+		}
+		s.queue.Add(current.node)
 		s.mu.Unlock()
 		return current.val, true
 	}
+	entry.node = s.queue.AddNew(key)
 	s.m[key] = entry
 	s.mu.Unlock()
-	if ok && s.onEviction != nil {
+	if s.onEviction != nil {
 		s.onEviction(key, current.val, EvictionReasonExpired)
 	}
-	return entry.val, false
+	return val, false
 }
 
 // Replace replaces the value for the given key.
