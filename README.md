@@ -42,7 +42,7 @@ func main() {
 
 ### Expiration
 
-`imcache` supports no expiration, absolute expiration and sliding expiration. No expiration simply means that the entry will never expire, absolute expiration means that the entry will expire after a certain time and sliding expiration means that the entry will expire after a certain time if it hasn't been accessed. More on limiting the max number of entries in the cache can be found in the [Max entries limit](#max-entries-limit) section.
+`imcache` supports no expiration, absolute expiration and sliding expiration. No expiration simply means that the entry will never expire, absolute expiration means that the entry will expire after a certain time and sliding expiration means that the entry will expire after a certain time if it hasn't been accessed.
 
 ```go
 // Set a new value with no expiration time.
@@ -69,7 +69,7 @@ c2.Set(1, "one", imcache.WithDefaultExpiration())
 
 ### Key eviction
 
-`imcache` follows very naive and simple eviction approach. If an expired entry is accessed by any `Cache` method, it is removed from the cache. The exception is the max entries limit. If the max entries limit is set, the cache  evicts the least recently used entry when the max entries limit is reached regardless of the expiration time.
+`imcache` follows very naive and simple eviction approach. If an expired entry is accessed by any `Cache` method, it is removed from the cache. The exception is the max entries limit. If the max entries limit is set, the cache  evicts the least recently used entry when the max entries limit is reached regardless of the expiration time. More on limiting the max number of entries in the cache can be found in the [Max entries limit](#max-entries-limit) section.
 
 It is possible to use the `Cleaner` to periodically remove expired entries from the cache. The `Cleaner` is a background goroutine that periodically removes expired entries from the cache. The `Cleaner` is disabled by default. You can enable it by calling the `StartCleaner` method. The `Cleaner` can be stopped by calling the `StopCleaner` method.
 
@@ -116,7 +116,7 @@ func main() {
 
 `imcache` supports max entries limit. If the max entries limit is set, the cache evicts the least recently used entry when the max entries limit is reached regardless of the expiration time.
 
-LRU eviction is implemented using a doubly linked list. The list is ordered by the time of the last access to the entry. The most recently used entry is always at the head of the list. The least recently used entry is always at the tail of the list. It means that if the max entries limit is set, `Cache` maintains another data structure in addition to the map of entries. It increases the memory usage and decreases the write performance.
+LRU eviction is implemented using a doubly linked list. The list is ordered by the time of the last access to the entry. The most recently used entry is always at the head of the list. The least recently used entry is always at the tail of the list. It means that if the max entries limit is set, `Cache` maintains another data structure in addition to the map of entries. It increases the memory usage and slightly decreases the write performance.
 
 The max entries limit can be configured when creating a new `Cache` instance.
 
