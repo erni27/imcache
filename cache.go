@@ -1,5 +1,6 @@
 // Package imcache provides a generic in-memory cache.
-// It supports expiration, sliding expiration, eviction callbacks and sharding.
+// It supports expiration, sliding expiration, max entries limit,
+// eviction callbacks and sharding.
 // It's safe for concurrent use by multiple goroutines.
 //
 // The New function creates a new in-memory non-sharded cache instance.
@@ -129,7 +130,7 @@ func (s *Cache[K, V]) Set(key K, val V, exp Expiration) {
 		}
 		return
 	}
-	if s.size == 0 || s.len() <= s.size {
+	if s.size <= 0 || s.len() <= s.size {
 		s.mu.Unlock()
 		return
 	}
@@ -165,7 +166,7 @@ func (s *Cache[K, V]) GetOrSet(key K, val V, exp Expiration) (V, bool) {
 	if !ok {
 		entry.node = s.queue.AddNew(key)
 		s.m[key] = entry
-		if s.size == 0 || s.len() <= s.size {
+		if s.size <= 0 || s.len() <= s.size {
 			s.mu.Unlock()
 			return val, false
 		}
@@ -495,6 +496,8 @@ func NewSharded[K comparable, V any](n int, hasher Hasher64[K], opts ...Option[K
 // Sharded is a sharded in-memory cache.
 // It is a cache consisting of n shards
 // and sharded by the given Hasher64.
+//
+// Each shard is a separate Cache instance.
 //
 // By default it has no default expiration,
 // no default sliding expiration and no eviction callback.

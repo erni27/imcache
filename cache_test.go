@@ -1358,7 +1358,7 @@ func TestImcache_SizeExceeded(t *testing.T) {
 	}{
 		{
 			name: "not sharded",
-			c:    New(WithEvictionCallbackOption(evictioncMock.Callback), WithMaxSizeOption[string, interface{}](5)),
+			c:    New(WithEvictionCallbackOption(evictioncMock.Callback), WithMaxEntriesOption[string, interface{}](5)),
 		},
 	}
 

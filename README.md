@@ -8,7 +8,7 @@
 
 `imcache` is a generic in-memory cache Go library.
 
-It supports expiration, sliding expiration, eviction callbacks and sharding. It's safe for concurrent use by multiple goroutines.
+It supports expiration, sliding expiration, max entries limit, eviction callbacks and sharding. It's safe for concurrent use by multiple goroutines.
 
 ```Go
 import "github.com/erni27/imcache"
@@ -42,7 +42,7 @@ func main() {
 
 ### Expiration
 
-`imcache` supports no expiration, absolute expiration and sliding expiration. No expiration simply means that the entry will never expire, absolute expiration means that the entry will expire after a certain time and sliding expiration means that the entry will expire after a certain time if it hasn't been accessed.
+`imcache` supports no expiration, absolute expiration and sliding expiration. No expiration simply means that the entry will never expire, absolute expiration means that the entry will expire after a certain time and sliding expiration means that the entry will expire after a certain time if it hasn't been accessed. More on limiting the max number of entries in the cache can be found in the [Max entries limit](#max-entries-limit) section.
 
 ```go
 // Set a new value with no expiration time.
@@ -69,7 +69,7 @@ c2.Set(1, "one", imcache.WithDefaultExpiration())
 
 ### Key eviction
 
-`imcache` follows very naive and simple eviction approach. If an expired entry is accessed by any `Cache` method, it is removed from the cache.
+`imcache` follows very naive and simple eviction approach. If an expired entry is accessed by any `Cache` method, it is removed from the cache. The exception is the max entries limit. If the max entries limit is set, the cache  evicts the least recently used entry when the max entries limit is reached regardless of the expiration time.
 
 It is possible to use the `Cleaner` to periodically remove expired entries from the cache. The `Cleaner` is a background goroutine that periodically removes expired entries from the cache. The `Cleaner` is disabled by default. You can enable it by calling the `StartCleaner` method. The `Cleaner` can be stopped by calling the `StopCleaner` method.
 
@@ -112,6 +112,18 @@ func main() {
 }
 ```
 
+### Max entries limit
+
+`imcache` supports max entries limit. If the max entries limit is set, the cache evicts the least recently used entry when the max entries limit is reached regardless of the expiration time.
+
+LRU eviction is implemented using a doubly linked list. The list is ordered by the time of the last access to the entry. The most recently used entry is always at the head of the list. The least recently used entry is always at the tail of the list. It means that if the max entries limit is set, `Cache` maintains another data structure in addition to the map of entries. It increases the memory usage and decreases the write performance.
+
+The max entries limit can be configured when creating a new `Cache` instance.
+
+```go
+c := imcache.New(imcache.WithMaxEntriesOption[uint32, string](1000))
+```
+
 ### Sharding
 
 `imcache` supports sharding. It's possible to create a new cache instance with a given number of shards. Each shard is a separate `Cache` instance. A shard for a given key is selected by computing the hash of the key and taking the modulus of the number of shards. `imcache` exposes the `Hasher64` interface that wraps `Sum64` accepting a key and returning a 64-bit hash of the input key. It can be used to implement custom sharding algorithms.
@@ -124,4 +136,4 @@ A `Sharded` instance can be created by calling the `NewSharded` method. It accep
 c := imcache.NewSharded[string, string](4, imcache.DefaultStringHasher64{})
 ```
 
-All previous examples apply to `Sharded` type as well.
+All previous examples apply to `Sharded` type as well. Note that `Option`(s) are applied to each shard not to the `Sharded` instance itself.
