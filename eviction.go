@@ -10,6 +10,9 @@ const (
 	EvictionReasonRemoved
 	// EvictionReasonReplaced indicates that the entry was evicted because it was replaced.
 	EvictionReasonReplaced
+	// EvictionReasonSizeExceeded indicates that the entry was evicted because the cache size exceeded.
+	// imcache uses LRU eviction policy when the cache size exceeds the maximum size.
+	EvictionReasonSizeExceeded
 )
 
 func (r EvictionReason) String() string {
@@ -20,6 +23,8 @@ func (r EvictionReason) String() string {
 		return "removed"
 	case EvictionReasonReplaced:
 		return "replaced"
+	case EvictionReasonSizeExceeded:
+		return "size exceeded"
 	default:
 		return "unknown"
 	}

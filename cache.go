@@ -19,9 +19,10 @@ import (
 // Option(s) can be used to customize the returned Cache.
 func New[K comparable, V any](opts ...Option[K, V]) *Cache[K, V] {
 	s := &Cache[K, V]{
-		m:          make(map[K]entry[V]),
+		m:          make(map[K]entry[K, V]),
 		defaultExp: -1,
 		cleaner:    newCleaner(),
+		queue:      &nopq[K]{},
 	}
 	for _, opt := range opts {
 		opt.apply(s)
@@ -46,7 +47,10 @@ func New[K comparable, V any](opts ...Option[K, V]) *Cache[K, V] {
 //	)
 type Cache[K comparable, V any] struct {
 	mu sync.Mutex
-	m  map[K]entry[V]
+	m  map[K]entry[K, V]
+
+	queue queue[K]
+	size  int
 
 	defaultExp time.Duration
 	sliding    bool
@@ -57,10 +61,11 @@ type Cache[K comparable, V any] struct {
 }
 
 // init initializes the Cache.
-// It is not a concurrently-safe method.
+// It is not a concurrency-safe method.
 func (s *Cache[K, V]) init() {
 	if s.m == nil {
-		s.m = make(map[K]entry[V])
+		s.m = make(map[K]entry[K, V])
+		s.queue = &nopq[K]{}
 	}
 }
 
@@ -76,6 +81,7 @@ func (s *Cache[K, V]) Get(key K) (V, bool) {
 		s.mu.Unlock()
 		return empty, false
 	}
+	s.queue.Remove(entry.node)
 	if entry.HasExpired(now) {
 		delete(s.m, key)
 		s.mu.Unlock()
@@ -88,6 +94,7 @@ func (s *Cache[K, V]) Get(key K) (V, bool) {
 		entry.SlideExpiration(now)
 		s.m[key] = entry
 	}
+	s.queue.Add(entry.node)
 	s.mu.Unlock()
 	return entry.val, true
 }
@@ -101,21 +108,44 @@ func (s *Cache[K, V]) Get(key K) (V, bool) {
 // If you don't want to add a new entry if it doesn't exist, use the Replace method instead.
 func (s *Cache[K, V]) Set(key K, val V, exp Expiration) {
 	now := time.Now()
-	entry := entry[V]{val: val}
+	entry := entry[K, V]{val: val}
 	exp.apply(&entry.exp)
 	entry.SetDefault(now, s.defaultExp, s.sliding)
 	s.mu.Lock()
 	// Make sure that the shard is initialized.
 	s.init()
+	entry.node = s.queue.AddNew(key)
 	current, ok := s.m[key]
 	s.m[key] = entry
-	s.mu.Unlock()
-	if ok && s.onEviction != nil {
-		if current.HasExpired(now) {
-			s.onEviction(key, current.val, EvictionReasonExpired)
-		} else {
-			s.onEviction(key, current.val, EvictionReasonReplaced)
+	if ok {
+		s.queue.Remove(current.node)
+		s.mu.Unlock()
+		if s.onEviction != nil {
+			if current.HasExpired(now) {
+				s.onEviction(key, current.val, EvictionReasonExpired)
+			} else {
+				s.onEviction(key, current.val, EvictionReasonReplaced)
+			}
 		}
+		return
+	}
+	if s.size == 0 || s.len() <= s.size {
+		s.mu.Unlock()
+		return
+	}
+	node := s.queue.Pop()
+	if s.onEviction == nil {
+		delete(s.m, node.key)
+		s.mu.Unlock()
+		return
+	}
+	entry = s.m[node.key]
+	delete(s.m, node.key)
+	s.mu.Unlock()
+	if entry.HasExpired(now) {
+		s.onEviction(node.key, entry.val, EvictionReasonExpired)
+	} else {
+		s.onEviction(node.key, entry.val, EvictionReasonSizeExceeded)
 	}
 }
 
@@ -125,7 +155,7 @@ func (s *Cache[K, V]) Set(key K, val V, exp Expiration) {
 // If it encounters an expired entry, the expired entry is evicted.
 func (s *Cache[K, V]) GetOrSet(key K, val V, exp Expiration) (V, bool) {
 	now := time.Now()
-	entry := entry[V]{val: val}
+	entry := entry[K, V]{val: val}
 	exp.apply(&entry.exp)
 	entry.SetDefault(now, s.defaultExp, s.sliding)
 	s.mu.Lock()
@@ -152,7 +182,7 @@ func (s *Cache[K, V]) GetOrSet(key K, val V, exp Expiration) (V, bool) {
 // If you want to add or replace an entry, use the Set method instead.
 func (s *Cache[K, V]) Replace(key K, val V, exp Expiration) bool {
 	now := time.Now()
-	entry := entry[V]{val: val}
+	entry := entry[K, V]{val: val}
 	exp.apply(&entry.exp)
 	entry.SetDefault(now, s.defaultExp, s.sliding)
 	s.mu.Lock()
@@ -161,6 +191,8 @@ func (s *Cache[K, V]) Replace(key K, val V, exp Expiration) bool {
 		s.mu.Unlock()
 		return false
 	}
+	entry.node = current.node
+	s.queue.Remove(current.node)
 	if current.HasExpired(now) {
 		delete(s.m, key)
 		s.mu.Unlock()
@@ -169,6 +201,7 @@ func (s *Cache[K, V]) Replace(key K, val V, exp Expiration) bool {
 		}
 		return false
 	}
+	s.queue.Add(entry.node)
 	s.m[key] = entry
 	s.mu.Unlock()
 	if s.onEviction != nil {
@@ -202,6 +235,7 @@ func (s *Cache[K, V]) ReplaceWithFunc(key K, f func(V) V, exp Expiration) bool {
 		s.mu.Unlock()
 		return false
 	}
+	s.queue.Remove(current.node)
 	if current.HasExpired(now) {
 		delete(s.m, key)
 		s.mu.Unlock()
@@ -210,9 +244,10 @@ func (s *Cache[K, V]) ReplaceWithFunc(key K, f func(V) V, exp Expiration) bool {
 		}
 		return false
 	}
-	entry := entry[V]{val: f(current.val)}
+	entry := entry[K, V]{val: f(current.val), node: current.node}
 	exp.apply(&entry.exp)
 	entry.SetDefault(now, s.defaultExp, s.sliding)
+	s.queue.Add(entry.node)
 	s.m[key] = entry
 	s.mu.Unlock()
 	if s.onEviction != nil {
@@ -238,6 +273,7 @@ func (s *Cache[K, V]) Remove(key K) bool {
 		return false
 	}
 	delete(s.m, key)
+	s.queue.Remove(entry.node)
 	s.mu.Unlock()
 	if entry.HasExpired(now) {
 		if s.onEviction != nil {
@@ -254,7 +290,12 @@ func (s *Cache[K, V]) Remove(key K) bool {
 func (s *Cache[K, V]) removeAll(now time.Time) {
 	s.mu.Lock()
 	removed := s.m
-	s.m = make(map[K]entry[V])
+	s.m = make(map[K]entry[K, V])
+	if s.size > 0 {
+		s.queue = &fifoq[K]{}
+	} else {
+		s.queue = &nopq[K]{}
+	}
 	s.mu.Unlock()
 	if s.onEviction != nil {
 		for key, entry := range removed {
@@ -295,6 +336,7 @@ func (s *Cache[K, V]) removeStale(now time.Time) {
 		if entry.HasExpired(now) {
 			removed = append(removed, kv[K, V]{key, entry.val})
 			delete(s.m, key)
+			s.queue.Remove(entry.node)
 		}
 	}
 	s.mu.Unlock()
@@ -340,6 +382,7 @@ func (s *Cache[K, V]) getAll(now time.Time) map[K]V {
 		if entry.HasExpired(now) {
 			expired = append(expired, kv[K, V]{key: key, val: entry.val})
 			delete(s.m, key)
+			s.queue.Remove(entry.node)
 		} else {
 			if entry.HasSlidingExpiration() {
 				entry.SlideExpiration(now)
@@ -362,10 +405,16 @@ func (s *Cache[K, V]) GetAll() map[K]V {
 	return s.getAll(time.Now())
 }
 
+// len returns the number of entries in the cache.
+// It is not a concurrency-safe method.
+func (s *Cache[K, V]) len() int {
+	return len(s.m)
+}
+
 // Len returns the number of entries in the cache.
 func (s *Cache[K, V]) Len() int {
 	s.mu.Lock()
-	n := len(s.m)
+	n := s.len()
 	s.mu.Unlock()
 	return n
 }

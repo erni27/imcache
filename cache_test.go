@@ -823,15 +823,19 @@ func (m *evictionCallbackMock) Callback(key string, val interface{}, reason Evic
 
 func (m *evictionCallbackMock) HasBeenCalledWith(key string, val interface{}, reason EvictionReason) bool {
 	m.mu.Lock()
-	var call evictionCallbackCall
+	var calls []evictionCallbackCall
 	for _, c := range m.calls {
 		if c.key == key {
-			call = c
-			break
+			calls = append(calls, c)
 		}
 	}
 	m.mu.Unlock()
-	return call.key == key && call.val == val && call.reason == reason
+	for _, c := range calls {
+		if c.val == val && c.reason == reason {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *evictionCallbackMock) HasNotBeenCalled() bool {
@@ -1307,5 +1311,147 @@ func TestCache_ZeroValue(t *testing.T) {
 	c.Set("foo", "bar", WithNoExpiration())
 	if v, ok := c.Get("foo"); !ok || v != "bar" {
 		t.Errorf("want Cache.Get(_) = %s, true, got %s, %t", "bar", v, ok)
+	}
+}
+
+func TestImcache_Set_SizeExceeded(t *testing.T) {
+	evictioncMock := &evictionCallbackMock{}
+
+	tests := []struct {
+		name string
+		c    Imcache[string, interface{}]
+	}{
+		{
+			name: "not sharded",
+			c:    New(WithEvictionCallbackOption(evictioncMock.Callback), WithMaxSizeOption[string, interface{}](5)),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := tt.c
+			c.Set("one", 1, WithNoExpiration())
+			c.Set("two", 2, WithNoExpiration())
+			c.Set("three", 3, WithNoExpiration())
+			c.Set("four", 4, WithExpiration(time.Nanosecond))
+			c.Set("five", 5, WithNoExpiration())
+
+			// Should evict the first added entry.
+			c.Set("six", 6, WithNoExpiration())
+			if _, ok := c.Get("one"); ok {
+				t.Error("want Cache.Get(_) = _, false, got _, true")
+			}
+			if !evictioncMock.HasBeenCalledWith("one", 1, EvictionReasonSizeExceeded) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "one", 1, EvictionReasonSizeExceeded)
+			}
+
+			// Should not evict the accesed entry.
+			if _, ok := c.Get("two"); !ok {
+				t.Error("want Cache.Get(_) = _, true, got _, false")
+			}
+			c.Set("seven", 7, WithNoExpiration())
+			if _, ok := c.Get("three"); ok {
+				t.Error("want Cache.Get(_) = _, false, got _, true")
+			}
+			if !evictioncMock.HasBeenCalledWith("three", 3, EvictionReasonSizeExceeded) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "three", 3, EvictionReasonSizeExceeded)
+			}
+
+			// Should evict the expired entry.
+			c.Set("eight", 8, WithNoExpiration())
+			if _, ok := c.Get("four"); ok {
+				t.Error("want Cache.Get(_) = _, false, got _, true")
+			}
+			if !evictioncMock.HasBeenCalledWith("four", 4, EvictionReasonExpired) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "four", 4, EvictionReasonExpired)
+			}
+
+			// Should not evict the replaced entry.
+			if ok := c.Replace("five", 5, WithNoExpiration()); !ok {
+				t.Error("want Cache.Replace(_) = true, got false")
+			}
+			c.Set("nine", 9, WithNoExpiration())
+			if _, ok := c.Get("six"); ok {
+				t.Error("want Cache.Get(_) = _, false, got _, true")
+			}
+			if !evictioncMock.HasBeenCalledWith("six", 6, EvictionReasonSizeExceeded) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "six", 6, EvictionReasonSizeExceeded)
+			}
+
+			// Should not evict the replaced with func entry.
+			if ok := c.ReplaceWithFunc("two", func(interface{}) interface{} { return 2 }, WithNoExpiration()); !ok {
+				t.Error("want Cache.ReplaceWithFunc(_) = true, got false")
+			}
+			c.Set("ten", 10, WithNoExpiration())
+			if _, ok := c.Get("seven"); ok {
+				t.Error("want Cache.Get(_) = _, false, got _, true")
+			}
+			if !evictioncMock.HasBeenCalledWith("seven", 7, EvictionReasonSizeExceeded) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "seven", 7, EvictionReasonSizeExceeded)
+			}
+
+			// Should not evict any entry if the size is not exceeded.
+			c.Set("ten", 10, WithNoExpiration())
+			if _, ok := c.Get("eight"); !ok {
+				t.Error("want Cache.Get(_) = _, true, got _, false")
+			}
+
+			// GetAll should not change the LRU queue.
+			c.GetAll()
+			c.Set("eleven", 11, WithNoExpiration())
+			if _, ok := c.Get("five"); ok {
+				t.Error("want Cache.Get(_) = _, false, got _, true")
+			}
+			if !evictioncMock.HasBeenCalledWith("five", 5, EvictionReasonSizeExceeded) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "five", 5, EvictionReasonSizeExceeded)
+			}
+
+			// Remove should not mess with the LRU queue.
+			if ok := c.Remove("two"); !ok {
+				t.Error("want Cache.Remove(_) = true, got false")
+			}
+			c.Set("twelve", 12, WithNoExpiration())
+			if _, ok := c.Get("nine"); !ok {
+				t.Error("want Cache.Get(_) = _, true, got _, false")
+			}
+			c.Set("thirteen", 13, WithNoExpiration())
+			if _, ok := c.Get("ten"); ok {
+				t.Error("want Cache.Get(_) = _, false, got _, true")
+			}
+			if !evictioncMock.HasBeenCalledWith("ten", 10, EvictionReasonSizeExceeded) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "ten", 10, EvictionReasonSizeExceeded)
+			}
+
+			// RemoveAll reset the LRU queue.
+			c.RemoveAll()
+			c.Set("fourteen", 14, WithNoExpiration())
+			c.Set("fifteen", 15, WithNoExpiration())
+			c.Set("sixteen", 16, WithExpiration(time.Nanosecond))
+			c.Set("seventeen", 17, WithNoExpiration())
+			c.Set("eighteen", 18, WithNoExpiration())
+			if _, ok := c.Get("fourteen"); !ok {
+				t.Error("Cache.Get(_) = _, false, want _, true")
+			}
+			c.Set("nineteen", 19, WithExpiration(time.Nanosecond))
+			if _, ok := c.Get("fifteen"); ok {
+				t.Error("Cache.Get(_) = _, true, got _, false")
+			}
+			if !evictioncMock.HasBeenCalledWith("fifteen", 15, EvictionReasonSizeExceeded) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "fifteen", 15, EvictionReasonSizeExceeded)
+			}
+
+			// RemoveStale should not mess with the LRU queue.
+			c.Set("twenty", 20, WithNoExpiration())
+			if _, ok := c.Get("seventeen"); !ok {
+				t.Error("Cache.Get(_) = _, false, want _, true")
+			}
+			c.Set("twentyone", 21, WithNoExpiration())
+			if _, ok := c.Get("eighteen"); ok {
+				t.Error("Cache.Get(_) = _, true, got _, false")
+			}
+			if !evictioncMock.HasBeenCalledWith("eighteen", 18, EvictionReasonSizeExceeded) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "eighteen", 18, EvictionReasonSizeExceeded)
+			}
+		})
 	}
 }

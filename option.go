@@ -35,3 +35,12 @@ func WithDefaultSlidingExpirationOption[K comparable, V any](d time.Duration) Op
 		s.sliding = true
 	})
 }
+
+// WithMaxSizeOption returns an Option that sets the Cache maximum size.
+// When the maximum size is exceeded, the least recently used entry is evicted.
+func WithMaxSizeOption[K comparable, V any](n int) Option[K, V] {
+	return optionf[K, V](func(s *Cache[K, V]) {
+		s.size = n
+		s.queue = &fifoq[K]{}
+	})
+}
