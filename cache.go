@@ -73,30 +73,30 @@ func (s *Cache[K, V]) init() {
 // Get returns the value for the given key.
 //
 // If it encounters an expired entry, the expired entry is evicted.
-func (s *Cache[K, V]) Get(key K) (V, bool) {
+func (c *Cache[K, V]) Get(key K) (V, bool) {
 	now := time.Now()
 	var empty V
-	s.mu.Lock()
-	entry, ok := s.m[key]
+	c.mu.Lock()
+	entry, ok := c.m[key]
 	if !ok {
-		s.mu.Unlock()
+		c.mu.Unlock()
 		return empty, false
 	}
-	s.queue.Remove(entry.node)
+	c.queue.Remove(entry.node)
 	if entry.HasExpired(now) {
-		delete(s.m, key)
-		s.mu.Unlock()
-		if s.onEviction != nil {
-			s.onEviction(key, entry.val, EvictionReasonExpired)
+		delete(c.m, key)
+		c.mu.Unlock()
+		if c.onEviction != nil {
+			c.onEviction(key, entry.val, EvictionReasonExpired)
 		}
 		return empty, false
 	}
 	if entry.HasSlidingExpiration() {
 		entry.SlideExpiration(now)
-		s.m[key] = entry
+		c.m[key] = entry
 	}
-	s.queue.Add(entry.node)
-	s.mu.Unlock()
+	c.queue.Add(entry.node)
+	c.mu.Unlock()
 	return entry.val, true
 }
 
@@ -107,46 +107,46 @@ func (s *Cache[K, V]) Get(key K) (V, bool) {
 //
 // If you don't want to replace an existing entry, use the GetOrSet method instead.
 // If you don't want to add a new entry if it doesn't exist, use the Replace method instead.
-func (s *Cache[K, V]) Set(key K, val V, exp Expiration) {
+func (c *Cache[K, V]) Set(key K, val V, exp Expiration) {
 	now := time.Now()
 	entry := entry[K, V]{val: val}
 	exp.apply(&entry.exp)
-	entry.SetDefault(now, s.defaultExp, s.sliding)
-	s.mu.Lock()
+	entry.SetDefault(now, c.defaultExp, c.sliding)
+	c.mu.Lock()
 	// Make sure that the shard is initialized.
-	s.init()
-	entry.node = s.queue.AddNew(key)
-	current, ok := s.m[key]
-	s.m[key] = entry
+	c.init()
+	entry.node = c.queue.AddNew(key)
+	current, ok := c.m[key]
+	c.m[key] = entry
 	if ok {
-		s.queue.Remove(current.node)
-		s.mu.Unlock()
-		if s.onEviction != nil {
+		c.queue.Remove(current.node)
+		c.mu.Unlock()
+		if c.onEviction != nil {
 			if current.HasExpired(now) {
-				s.onEviction(key, current.val, EvictionReasonExpired)
+				c.onEviction(key, current.val, EvictionReasonExpired)
 			} else {
-				s.onEviction(key, current.val, EvictionReasonReplaced)
+				c.onEviction(key, current.val, EvictionReasonReplaced)
 			}
 		}
 		return
 	}
-	if s.size <= 0 || s.len() <= s.size {
-		s.mu.Unlock()
+	if c.size <= 0 || c.len() <= c.size {
+		c.mu.Unlock()
 		return
 	}
-	node := s.queue.Pop()
-	if s.onEviction == nil {
-		delete(s.m, node.key)
-		s.mu.Unlock()
+	node := c.queue.Pop()
+	if c.onEviction == nil {
+		delete(c.m, node.key)
+		c.mu.Unlock()
 		return
 	}
-	toevict := s.m[node.key]
-	delete(s.m, node.key)
-	s.mu.Unlock()
+	toevict := c.m[node.key]
+	delete(c.m, node.key)
+	c.mu.Unlock()
 	if toevict.HasExpired(now) {
-		s.onEviction(node.key, toevict.val, EvictionReasonExpired)
+		c.onEviction(node.key, toevict.val, EvictionReasonExpired)
 	} else {
-		s.onEviction(node.key, toevict.val, EvictionReasonSizeExceeded)
+		c.onEviction(node.key, toevict.val, EvictionReasonSizeExceeded)
 	}
 }
 
@@ -154,53 +154,53 @@ func (s *Cache[K, V]) Set(key K, val V, exp Expiration) {
 // otherwise it sets the value for the given key and returns the set value and false.
 //
 // If it encounters an expired entry, the expired entry is evicted.
-func (s *Cache[K, V]) GetOrSet(key K, val V, exp Expiration) (V, bool) {
+func (c *Cache[K, V]) GetOrSet(key K, val V, exp Expiration) (V, bool) {
 	now := time.Now()
 	entry := entry[K, V]{val: val}
 	exp.apply(&entry.exp)
-	entry.SetDefault(now, s.defaultExp, s.sliding)
-	s.mu.Lock()
+	entry.SetDefault(now, c.defaultExp, c.sliding)
+	c.mu.Lock()
 	// Make sure that the shard is initialized.
-	s.init()
-	current, ok := s.m[key]
+	c.init()
+	current, ok := c.m[key]
 	if !ok {
-		entry.node = s.queue.AddNew(key)
-		s.m[key] = entry
-		if s.size <= 0 || s.len() <= s.size {
-			s.mu.Unlock()
+		entry.node = c.queue.AddNew(key)
+		c.m[key] = entry
+		if c.size <= 0 || c.len() <= c.size {
+			c.mu.Unlock()
 			return val, false
 		}
-		node := s.queue.Pop()
-		if s.onEviction == nil {
-			delete(s.m, node.key)
-			s.mu.Unlock()
+		node := c.queue.Pop()
+		if c.onEviction == nil {
+			delete(c.m, node.key)
+			c.mu.Unlock()
 			return val, false
 		}
-		toevict := s.m[node.key]
-		delete(s.m, node.key)
-		s.mu.Unlock()
+		toevict := c.m[node.key]
+		delete(c.m, node.key)
+		c.mu.Unlock()
 		if toevict.HasExpired(now) {
-			s.onEviction(node.key, toevict.val, EvictionReasonExpired)
+			c.onEviction(node.key, toevict.val, EvictionReasonExpired)
 		} else {
-			s.onEviction(node.key, toevict.val, EvictionReasonSizeExceeded)
+			c.onEviction(node.key, toevict.val, EvictionReasonSizeExceeded)
 		}
 		return val, false
 	}
-	s.queue.Remove(current.node)
+	c.queue.Remove(current.node)
 	if !current.HasExpired(now) {
 		if current.HasSlidingExpiration() {
 			current.SlideExpiration(now)
-			s.m[key] = current
+			c.m[key] = current
 		}
-		s.queue.Add(current.node)
-		s.mu.Unlock()
+		c.queue.Add(current.node)
+		c.mu.Unlock()
 		return current.val, true
 	}
-	entry.node = s.queue.AddNew(key)
-	s.m[key] = entry
-	s.mu.Unlock()
-	if s.onEviction != nil {
-		s.onEviction(key, current.val, EvictionReasonExpired)
+	entry.node = c.queue.AddNew(key)
+	c.m[key] = entry
+	c.mu.Unlock()
+	if c.onEviction != nil {
+		c.onEviction(key, current.val, EvictionReasonExpired)
 	}
 	return val, false
 }
@@ -211,32 +211,32 @@ func (s *Cache[K, V]) GetOrSet(key K, val V, exp Expiration) (V, bool) {
 // If it encounters an expired entry, the expired entry is evicted.
 //
 // If you want to add or replace an entry, use the Set method instead.
-func (s *Cache[K, V]) Replace(key K, val V, exp Expiration) bool {
+func (c *Cache[K, V]) Replace(key K, val V, exp Expiration) bool {
 	now := time.Now()
 	entry := entry[K, V]{val: val}
 	exp.apply(&entry.exp)
-	entry.SetDefault(now, s.defaultExp, s.sliding)
-	s.mu.Lock()
-	current, ok := s.m[key]
+	entry.SetDefault(now, c.defaultExp, c.sliding)
+	c.mu.Lock()
+	current, ok := c.m[key]
 	if !ok {
-		s.mu.Unlock()
+		c.mu.Unlock()
 		return false
 	}
 	entry.node = current.node
-	s.queue.Remove(current.node)
+	c.queue.Remove(current.node)
 	if current.HasExpired(now) {
-		delete(s.m, key)
-		s.mu.Unlock()
-		if s.onEviction != nil {
-			s.onEviction(key, current.val, EvictionReasonExpired)
+		delete(c.m, key)
+		c.mu.Unlock()
+		if c.onEviction != nil {
+			c.onEviction(key, current.val, EvictionReasonExpired)
 		}
 		return false
 	}
-	s.queue.Add(entry.node)
-	s.m[key] = entry
-	s.mu.Unlock()
-	if s.onEviction != nil {
-		s.onEviction(key, current.val, EvictionReasonReplaced)
+	c.queue.Add(entry.node)
+	c.m[key] = entry
+	c.mu.Unlock()
+	if c.onEviction != nil {
+		c.onEviction(key, current.val, EvictionReasonReplaced)
 	}
 	return true
 }
@@ -258,31 +258,31 @@ func (s *Cache[K, V]) Replace(key K, val V, exp Expiration) bool {
 //	var c imcache.Cache[string, int32]
 //	c.Set("foo", 997, imcache.WithNoExpiration())
 //	_ = c.ReplaceWithFunc("foo", imcache.Increment[int32], imcache.WithNoExpiration())
-func (s *Cache[K, V]) ReplaceWithFunc(key K, f func(V) V, exp Expiration) bool {
+func (c *Cache[K, V]) ReplaceWithFunc(key K, f func(V) V, exp Expiration) bool {
 	now := time.Now()
-	s.mu.Lock()
-	current, ok := s.m[key]
+	c.mu.Lock()
+	current, ok := c.m[key]
 	if !ok {
-		s.mu.Unlock()
+		c.mu.Unlock()
 		return false
 	}
-	s.queue.Remove(current.node)
+	c.queue.Remove(current.node)
 	if current.HasExpired(now) {
-		delete(s.m, key)
-		s.mu.Unlock()
-		if s.onEviction != nil {
-			s.onEviction(key, current.val, EvictionReasonExpired)
+		delete(c.m, key)
+		c.mu.Unlock()
+		if c.onEviction != nil {
+			c.onEviction(key, current.val, EvictionReasonExpired)
 		}
 		return false
 	}
 	entry := entry[K, V]{val: f(current.val), node: current.node}
 	exp.apply(&entry.exp)
-	entry.SetDefault(now, s.defaultExp, s.sliding)
-	s.queue.Add(entry.node)
-	s.m[key] = entry
-	s.mu.Unlock()
-	if s.onEviction != nil {
-		s.onEviction(key, current.val, EvictionReasonReplaced)
+	entry.SetDefault(now, c.defaultExp, c.sliding)
+	c.queue.Add(entry.node)
+	c.m[key] = entry
+	c.mu.Unlock()
+	if c.onEviction != nil {
+		c.onEviction(key, current.val, EvictionReasonReplaced)
 	}
 	return true
 }
@@ -295,45 +295,45 @@ func (s *Cache[K, V]) ReplaceWithFunc(key K, f func(V) V, exp Expiration) bool {
 // If it encounters an expired entry, the expired entry is evicted.
 // It results in calling the eviction callback with EvictionReasonExpired,
 // not EvictionReasonRemoved. If entry is expired, it returns false.
-func (s *Cache[K, V]) Remove(key K) bool {
+func (c *Cache[K, V]) Remove(key K) bool {
 	now := time.Now()
-	s.mu.Lock()
-	entry, ok := s.m[key]
+	c.mu.Lock()
+	entry, ok := c.m[key]
 	if !ok {
-		s.mu.Unlock()
+		c.mu.Unlock()
 		return false
 	}
-	delete(s.m, key)
-	s.queue.Remove(entry.node)
-	s.mu.Unlock()
+	delete(c.m, key)
+	c.queue.Remove(entry.node)
+	c.mu.Unlock()
 	if entry.HasExpired(now) {
-		if s.onEviction != nil {
-			s.onEviction(key, entry.val, EvictionReasonExpired)
+		if c.onEviction != nil {
+			c.onEviction(key, entry.val, EvictionReasonExpired)
 		}
 		return false
 	}
-	if s.onEviction != nil {
-		s.onEviction(key, entry.val, EvictionReasonRemoved)
+	if c.onEviction != nil {
+		c.onEviction(key, entry.val, EvictionReasonRemoved)
 	}
 	return true
 }
 
-func (s *Cache[K, V]) removeAll(now time.Time) {
-	s.mu.Lock()
-	removed := s.m
-	s.m = make(map[K]entry[K, V])
-	if s.size > 0 {
-		s.queue = &fifoq[K]{}
+func (c *Cache[K, V]) removeAll(now time.Time) {
+	c.mu.Lock()
+	removed := c.m
+	c.m = make(map[K]entry[K, V])
+	if c.size > 0 {
+		c.queue = &fifoq[K]{}
 	} else {
-		s.queue = &nopq[K]{}
+		c.queue = &nopq[K]{}
 	}
-	s.mu.Unlock()
-	if s.onEviction != nil {
+	c.mu.Unlock()
+	if c.onEviction != nil {
 		for key, entry := range removed {
 			if entry.HasExpired(now) {
-				s.onEviction(key, entry.val, EvictionReasonExpired)
+				c.onEviction(key, entry.val, EvictionReasonExpired)
 			} else {
-				s.onEviction(key, entry.val, EvictionReasonRemoved)
+				c.onEviction(key, entry.val, EvictionReasonRemoved)
 			}
 		}
 	}
@@ -346,41 +346,41 @@ func (s *Cache[K, V]) removeAll(now time.Time) {
 // If it encounters an expired entry, the expired entry is evicted.
 // It results in calling the eviction callback with EvictionReasonExpired,
 // not EvictionReasonRemoved.
-func (s *Cache[K, V]) RemoveAll() {
-	s.removeAll(time.Now())
+func (c *Cache[K, V]) RemoveAll() {
+	c.removeAll(time.Now())
 }
 
-func (s *Cache[K, V]) removeStale(now time.Time) {
-	s.mu.Lock()
+func (c *Cache[K, V]) removeStale(now time.Time) {
+	c.mu.Lock()
 	// To avoid copying the expired entries if there's no eviction callback.
-	if s.onEviction == nil {
-		for key, entry := range s.m {
+	if c.onEviction == nil {
+		for key, entry := range c.m {
 			if entry.HasExpired(now) {
-				delete(s.m, key)
+				delete(c.m, key)
 			}
 		}
-		s.mu.Unlock()
+		c.mu.Unlock()
 		return
 	}
 	var removed []kv[K, V]
-	for key, entry := range s.m {
+	for key, entry := range c.m {
 		if entry.HasExpired(now) {
 			removed = append(removed, kv[K, V]{key, entry.val})
-			delete(s.m, key)
-			s.queue.Remove(entry.node)
+			delete(c.m, key)
+			c.queue.Remove(entry.node)
 		}
 	}
-	s.mu.Unlock()
+	c.mu.Unlock()
 	for _, kv := range removed {
-		s.onEviction(kv.key, kv.val, EvictionReasonExpired)
+		c.onEviction(kv.key, kv.val, EvictionReasonExpired)
 	}
 }
 
 // RemoveStale removes all expired entries.
 //
 // If an eviction callback is set, it is called for each removed entry.
-func (s *Cache[K, V]) RemoveStale() {
-	s.removeStale(time.Now())
+func (c *Cache[K, V]) RemoveStale() {
+	c.removeStale(time.Now())
 }
 
 type kv[K comparable, V any] struct {
@@ -388,43 +388,43 @@ type kv[K comparable, V any] struct {
 	val V
 }
 
-func (s *Cache[K, V]) getAll(now time.Time) map[K]V {
-	s.mu.Lock()
+func (c *Cache[K, V]) getAll(now time.Time) map[K]V {
+	c.mu.Lock()
 	// To avoid copying the expired entries if there's no eviction callback.
-	if s.onEviction == nil {
-		m := make(map[K]V, len(s.m))
-		for key, entry := range s.m {
+	if c.onEviction == nil {
+		m := make(map[K]V, len(c.m))
+		for key, entry := range c.m {
 			if entry.HasExpired(now) {
-				delete(s.m, key)
+				delete(c.m, key)
 			} else {
 				if entry.HasSlidingExpiration() {
 					entry.SlideExpiration(now)
-					s.m[key] = entry
+					c.m[key] = entry
 				}
 				m[key] = entry.val
 			}
 		}
-		s.mu.Unlock()
+		c.mu.Unlock()
 		return m
 	}
 	var expired []kv[K, V]
-	m := make(map[K]V, len(s.m))
-	for key, entry := range s.m {
+	m := make(map[K]V, len(c.m))
+	for key, entry := range c.m {
 		if entry.HasExpired(now) {
 			expired = append(expired, kv[K, V]{key: key, val: entry.val})
-			delete(s.m, key)
-			s.queue.Remove(entry.node)
+			delete(c.m, key)
+			c.queue.Remove(entry.node)
 		} else {
 			if entry.HasSlidingExpiration() {
 				entry.SlideExpiration(now)
-				s.m[key] = entry
+				c.m[key] = entry
 			}
 			m[key] = entry.val
 		}
 	}
-	s.mu.Unlock()
+	c.mu.Unlock()
 	for _, kv := range expired {
-		s.onEviction(kv.key, kv.val, EvictionReasonExpired)
+		c.onEviction(kv.key, kv.val, EvictionReasonExpired)
 	}
 	return m
 }
@@ -432,21 +432,21 @@ func (s *Cache[K, V]) getAll(now time.Time) map[K]V {
 // GetAll returns a copy of all entries in the cache.
 //
 // If it encounters an expired entry, the expired entry is evicted.
-func (s *Cache[K, V]) GetAll() map[K]V {
-	return s.getAll(time.Now())
+func (c *Cache[K, V]) GetAll() map[K]V {
+	return c.getAll(time.Now())
 }
 
 // len returns the number of entries in the cache.
 // It is not a concurrency-safe method.
-func (s *Cache[K, V]) len() int {
-	return len(s.m)
+func (c *Cache[K, V]) len() int {
+	return len(c.m)
 }
 
 // Len returns the number of entries in the cache.
-func (s *Cache[K, V]) Len() int {
-	s.mu.Lock()
-	n := s.len()
-	s.mu.Unlock()
+func (c *Cache[K, V]) Len() int {
+	c.mu.Lock()
+	n := c.len()
+	c.mu.Unlock()
 	return n
 }
 
@@ -457,15 +457,15 @@ func (s *Cache[K, V]) Len() int {
 // or if the interval is less than or equal to zero.
 //
 // The cleaner can be stopped by calling StopCleaner method.
-func (s *Cache[K, V]) StartCleaner(interval time.Duration) error {
-	return s.cleaner.start(s, interval)
+func (c *Cache[K, V]) StartCleaner(interval time.Duration) error {
+	return c.cleaner.start(c, interval)
 }
 
 // StopCleaner stops the cleaner.
 // It is a blocking method that waits for the cleaner to stop.
 // It's a NOP method if the cleaner is not running.
-func (s *Cache[K, V]) StopCleaner() {
-	s.cleaner.stop()
+func (c *Cache[K, V]) StopCleaner() {
+	c.cleaner.stop()
 }
 
 // NewSharded returns a new Sharded instance.
