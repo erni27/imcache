@@ -13,17 +13,32 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
+type imcache[K comparable, V any] interface {
+	Get(key K) (v V, present bool)
+	Set(key K, val V, exp Expiration)
+	GetOrSet(key K, val V, exp Expiration) (v V, present bool)
+	Replace(key K, val V, exp Expiration) (present bool)
+	ReplaceWithFunc(key K, f func(old V) (new V), exp Expiration) (present bool)
+	Remove(key K) (present bool)
+	RemoveAll()
+	RemoveStale()
+	GetAll() map[K]V
+	Len() int
+	StartCleaner(interval time.Duration) error
+	StopCleaner()
+}
+
 func TestImcache_Get(t *testing.T) {
 	tests := []struct {
 		name string
-		c    func() Imcache[string, string]
+		c    func() imcache[string, string]
 		key  string
 		want string
 		ok   bool
 	}{
 		{
 			name: "success",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := New[string, string]()
 				c.Set("foo", "bar", WithNoExpiration())
 				return c
@@ -34,7 +49,7 @@ func TestImcache_Get(t *testing.T) {
 		},
 		{
 			name: "not found",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := New[string, string]()
 				return c
 			},
@@ -42,7 +57,7 @@ func TestImcache_Get(t *testing.T) {
 		},
 		{
 			name: "entry expired",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := New[string, string]()
 				c.Set("foo", "bar", WithExpiration(time.Nanosecond))
 				<-time.After(time.Nanosecond)
@@ -52,7 +67,7 @@ func TestImcache_Get(t *testing.T) {
 		},
 		{
 			name: "success - sharded",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := NewSharded[string, string](2, DefaultStringHasher64{})
 				c.Set("foo", "bar", WithNoExpiration())
 				return c
@@ -63,7 +78,7 @@ func TestImcache_Get(t *testing.T) {
 		},
 		{
 			name: "not found - sharded",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := NewSharded[string, string](4, DefaultStringHasher64{})
 				return c
 			},
@@ -71,7 +86,7 @@ func TestImcache_Get(t *testing.T) {
 		},
 		{
 			name: "entry expired - sharded",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := NewSharded[string, string](8, DefaultStringHasher64{})
 				c.Set("foo", "bar", WithExpiration(time.Nanosecond))
 				<-time.After(time.Nanosecond)
@@ -98,7 +113,7 @@ func TestImcache_Get(t *testing.T) {
 func TestImcache_Get_SlidingExpiration(t *testing.T) {
 	tests := []struct {
 		name string
-		c    Imcache[string, string]
+		c    imcache[string, string]
 	}{
 		{
 			name: "not sharded",
@@ -133,13 +148,13 @@ func TestImcache_Get_SlidingExpiration(t *testing.T) {
 func TestImcache_Set(t *testing.T) {
 	tests := []struct {
 		name string
-		c    func() Imcache[string, string]
+		c    func() imcache[string, string]
 		key  string
 		val  string
 	}{
 		{
 			name: "add new entry",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := New[string, string]()
 				return c
 			},
@@ -148,7 +163,7 @@ func TestImcache_Set(t *testing.T) {
 		},
 		{
 			name: "replace existing entry",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := New[string, string]()
 				c.Set("foo", "foo", WithNoExpiration())
 				return c
@@ -158,7 +173,7 @@ func TestImcache_Set(t *testing.T) {
 		},
 		{
 			name: "add new entry if old expired",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := New[string, string]()
 				c.Set("foo", "foo", WithExpiration(time.Nanosecond))
 				<-time.After(time.Nanosecond)
@@ -169,7 +184,7 @@ func TestImcache_Set(t *testing.T) {
 		},
 		{
 			name: "add new entry - sharded",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := NewSharded[string, string](2, DefaultStringHasher64{})
 				return c
 			},
@@ -178,7 +193,7 @@ func TestImcache_Set(t *testing.T) {
 		},
 		{
 			name: "replace existing entry - sharded",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := NewSharded[string, string](4, DefaultStringHasher64{})
 				c.Set("foo", "foo", WithNoExpiration())
 				return c
@@ -188,7 +203,7 @@ func TestImcache_Set(t *testing.T) {
 		},
 		{
 			name: "add new entry if old expired - sharded",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := NewSharded[string, string](8, DefaultStringHasher64{})
 				c.Set("foo", "foo", WithExpiration(time.Nanosecond))
 				<-time.After(time.Nanosecond)
@@ -217,7 +232,7 @@ func TestImcache_Set(t *testing.T) {
 func TestImcache_GetOrSet(t *testing.T) {
 	tests := []struct {
 		name    string
-		c       func() Imcache[string, string]
+		c       func() imcache[string, string]
 		key     string
 		val     string
 		want    string
@@ -225,7 +240,7 @@ func TestImcache_GetOrSet(t *testing.T) {
 	}{
 		{
 			name: "add new entry",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := New[string, string]()
 				return c
 			},
@@ -235,7 +250,7 @@ func TestImcache_GetOrSet(t *testing.T) {
 		},
 		{
 			name: "add new entry if old expired",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := New[string, string]()
 				c.Set("foo", "foo", WithExpiration(time.Nanosecond))
 				<-time.After(time.Nanosecond)
@@ -247,7 +262,7 @@ func TestImcache_GetOrSet(t *testing.T) {
 		},
 		{
 			name: "get existing entry",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := New[string, string]()
 				c.Set("foo", "foo", WithNoExpiration())
 				return c
@@ -259,7 +274,7 @@ func TestImcache_GetOrSet(t *testing.T) {
 		},
 		{
 			name: "add new entry - sharded",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := NewSharded[string, string](2, DefaultStringHasher64{})
 				return c
 			},
@@ -269,7 +284,7 @@ func TestImcache_GetOrSet(t *testing.T) {
 		},
 		{
 			name: "add new entry if old expired - sharded",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := NewSharded[string, string](4, DefaultStringHasher64{})
 				c.Set("foo", "foo", WithExpiration(time.Nanosecond))
 				<-time.After(time.Nanosecond)
@@ -281,7 +296,7 @@ func TestImcache_GetOrSet(t *testing.T) {
 		},
 		{
 			name: "get existing entry - sharded",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := NewSharded[string, string](8, DefaultStringHasher64{})
 				c.Set("foo", "foo", WithNoExpiration())
 				return c
@@ -310,7 +325,7 @@ func TestImcache_GetOrSet(t *testing.T) {
 func TestImcache_GetOrSet_SlidingExpiration(t *testing.T) {
 	tests := []struct {
 		name string
-		c    Imcache[string, string]
+		c    imcache[string, string]
 	}{
 		{
 			name: "not sharded",
@@ -345,14 +360,14 @@ func TestImcache_GetOrSet_SlidingExpiration(t *testing.T) {
 func TestImcache_Replace(t *testing.T) {
 	tests := []struct {
 		name    string
-		c       func() Imcache[string, string]
+		c       func() imcache[string, string]
 		key     string
 		val     string
 		present bool
 	}{
 		{
 			name: "success",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := New[string, string]()
 				c.Set("foo", "foo", WithNoExpiration())
 				return c
@@ -363,7 +378,7 @@ func TestImcache_Replace(t *testing.T) {
 		},
 		{
 			name: "entry expired",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := New[string, string]()
 				c.Set("foo", "foo", WithExpiration(time.Nanosecond))
 				<-time.After(time.Nanosecond)
@@ -374,7 +389,7 @@ func TestImcache_Replace(t *testing.T) {
 		},
 		{
 			name: "entry doesn't exist",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := New[string, string]()
 				return c
 			},
@@ -383,7 +398,7 @@ func TestImcache_Replace(t *testing.T) {
 		},
 		{
 			name: "success - sharded",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := NewSharded[string, string](2, DefaultStringHasher64{})
 				c.Set("foo", "foo", WithNoExpiration())
 				return c
@@ -394,7 +409,7 @@ func TestImcache_Replace(t *testing.T) {
 		},
 		{
 			name: "entry expired - sharded",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := NewSharded[string, string](4, DefaultStringHasher64{})
 				c.Set("foo", "foo", WithExpiration(time.Nanosecond))
 				<-time.After(time.Nanosecond)
@@ -405,7 +420,7 @@ func TestImcache_Replace(t *testing.T) {
 		},
 		{
 			name: "entry doesn't exist - sharded",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := NewSharded[string, string](8, DefaultStringHasher64{})
 				return c
 			},
@@ -437,7 +452,7 @@ func TestImcache_Replace(t *testing.T) {
 func TestImcache_ReplaceWithFunc(t *testing.T) {
 	tests := []struct {
 		name    string
-		c       func() Imcache[string, int32]
+		c       func() imcache[string, int32]
 		key     string
 		f       func(int32) int32
 		want    bool
@@ -446,7 +461,7 @@ func TestImcache_ReplaceWithFunc(t *testing.T) {
 	}{
 		{
 			name: "success",
-			c: func() Imcache[string, int32] {
+			c: func() imcache[string, int32] {
 				c := New[string, int32]()
 				c.Set("foo", 997, WithNoExpiration())
 				return c
@@ -459,7 +474,7 @@ func TestImcache_ReplaceWithFunc(t *testing.T) {
 		},
 		{
 			name: "entry expired",
-			c: func() Imcache[string, int32] {
+			c: func() imcache[string, int32] {
 				c := New[string, int32]()
 				c.Set("foo", 997, WithExpiration(time.Nanosecond))
 				<-time.After(time.Nanosecond)
@@ -470,7 +485,7 @@ func TestImcache_ReplaceWithFunc(t *testing.T) {
 		},
 		{
 			name: "entry doesn't exist",
-			c: func() Imcache[string, int32] {
+			c: func() imcache[string, int32] {
 				c := New[string, int32]()
 				return c
 			},
@@ -479,7 +494,7 @@ func TestImcache_ReplaceWithFunc(t *testing.T) {
 		},
 		{
 			name: "success - sharded",
-			c: func() Imcache[string, int32] {
+			c: func() imcache[string, int32] {
 				c := NewSharded[string, int32](2, DefaultStringHasher64{})
 				c.Set("foo", 997, WithNoExpiration())
 				return c
@@ -492,7 +507,7 @@ func TestImcache_ReplaceWithFunc(t *testing.T) {
 		},
 		{
 			name: "entry expired - sharded",
-			c: func() Imcache[string, int32] {
+			c: func() imcache[string, int32] {
 				c := NewSharded[string, int32](4, DefaultStringHasher64{})
 				c.Set("foo", 997, WithExpiration(time.Nanosecond))
 				<-time.After(time.Nanosecond)
@@ -503,7 +518,7 @@ func TestImcache_ReplaceWithFunc(t *testing.T) {
 		},
 		{
 			name: "entry doesn't exist - sharded",
-			c: func() Imcache[string, int32] {
+			c: func() imcache[string, int32] {
 				c := NewSharded[string, int32](8, DefaultStringHasher64{})
 				return c
 			},
@@ -532,13 +547,13 @@ func TestImcache_ReplaceWithFunc(t *testing.T) {
 func TestImcache_Remove(t *testing.T) {
 	tests := []struct {
 		name    string
-		c       func() Imcache[string, string]
+		c       func() imcache[string, string]
 		key     string
 		present bool
 	}{
 		{
 			name: "success",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := New[string, string]()
 				c.Set("foo", "foo", WithNoExpiration())
 				return c
@@ -548,7 +563,7 @@ func TestImcache_Remove(t *testing.T) {
 		},
 		{
 			name: "entry doesn't exist",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := New[string, string]()
 				c.Set("foo", "foo", WithNoExpiration())
 				return c
@@ -557,7 +572,7 @@ func TestImcache_Remove(t *testing.T) {
 		},
 		{
 			name: "entry expired",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := New[string, string]()
 				c.Set("foo", "foo", WithExpiration(time.Nanosecond))
 				<-time.After(time.Nanosecond)
@@ -567,7 +582,7 @@ func TestImcache_Remove(t *testing.T) {
 		},
 		{
 			name: "success - sharded",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := NewSharded[string, string](2, DefaultStringHasher64{})
 				c.Set("foo", "foo", WithExpirationDate(time.Now().Add(time.Minute)))
 				return c
@@ -577,7 +592,7 @@ func TestImcache_Remove(t *testing.T) {
 		},
 		{
 			name: "entry doesn't exist - sharded",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := NewSharded[string, string](4, DefaultStringHasher64{})
 				c.Set("foo", "foo", WithNoExpiration())
 				return c
@@ -586,7 +601,7 @@ func TestImcache_Remove(t *testing.T) {
 		},
 		{
 			name: "entry expired - sharded",
-			c: func() Imcache[string, string] {
+			c: func() imcache[string, string] {
 				c := NewSharded[string, string](8, DefaultStringHasher64{})
 				c.Set("foo", "foo", WithExpirationDate(time.Now().Add(time.Nanosecond)))
 				<-time.After(time.Nanosecond)
@@ -612,7 +627,7 @@ func TestImcache_Remove(t *testing.T) {
 func TestImcache_RemoveAll(t *testing.T) {
 	tests := []struct {
 		name string
-		c    Imcache[string, string]
+		c    imcache[string, string]
 	}{
 		{
 			name: "not sharded",
@@ -644,7 +659,7 @@ func TestImcache_RemoveAll(t *testing.T) {
 func TestImcache_RemoveStale(t *testing.T) {
 	tests := []struct {
 		name string
-		c    Imcache[string, string]
+		c    imcache[string, string]
 	}{
 		{
 			name: "not sharded",
@@ -676,7 +691,7 @@ func TestImcache_RemoveStale(t *testing.T) {
 func TestImcache_GetAll(t *testing.T) {
 	tests := []struct {
 		name string
-		c    Imcache[string, string]
+		c    imcache[string, string]
 	}{
 		{
 			name: "not sharded",
@@ -710,7 +725,7 @@ func TestImcache_GetAll(t *testing.T) {
 func TestImcache_GetAll_SlidingExpiration(t *testing.T) {
 	tests := []struct {
 		name string
-		c    Imcache[string, string]
+		c    imcache[string, string]
 	}{
 		{
 			name: "not sharded",
@@ -751,7 +766,7 @@ func TestImcache_GetAll_SlidingExpiration(t *testing.T) {
 func TestImcache_Len(t *testing.T) {
 	tests := []struct {
 		name string
-		c    Imcache[string, int]
+		c    imcache[string, int]
 	}{
 		{
 			name: "not sharded",
@@ -780,7 +795,7 @@ func TestImcache_Len(t *testing.T) {
 func TestImcache_DefaultExpiration(t *testing.T) {
 	tests := []struct {
 		name string
-		c    Imcache[string, string]
+		c    imcache[string, string]
 	}{
 		{
 			name: "not sharded",
@@ -807,7 +822,7 @@ func TestImcache_DefaultExpiration(t *testing.T) {
 func TestImcache_DefaultSlidingExpiration(t *testing.T) {
 	tests := []struct {
 		name string
-		c    Imcache[string, string]
+		c    imcache[string, string]
 	}{
 		{
 			name: "not sharded",
@@ -886,7 +901,7 @@ func TestImcache_Get_EvictionCallback(t *testing.T) {
 
 	tests := []struct {
 		name string
-		c    Imcache[string, interface{}]
+		c    imcache[string, interface{}]
 	}{
 		{
 			name: "not sharded",
@@ -919,7 +934,7 @@ func TestImcache_Set_EvictionCallback(t *testing.T) {
 
 	tests := []struct {
 		name string
-		c    Imcache[string, interface{}]
+		c    imcache[string, interface{}]
 	}{
 		{
 			name: "not sharded",
@@ -955,7 +970,7 @@ func TestImcache_GetOrSet_EvictionCallback(t *testing.T) {
 
 	tests := []struct {
 		name string
-		c    Imcache[string, interface{}]
+		c    imcache[string, interface{}]
 	}{
 		{
 			name: "not sharded",
@@ -990,7 +1005,7 @@ func TestImcache_Replace_EvictionCallback(t *testing.T) {
 
 	tests := []struct {
 		name string
-		c    Imcache[string, interface{}]
+		c    imcache[string, interface{}]
 	}{
 		{
 			name: "not sharded",
@@ -1030,7 +1045,7 @@ func TestImcache_ReplaceWithFunc_EvictionCallback(t *testing.T) {
 
 	tests := []struct {
 		name string
-		c    Imcache[string, interface{}]
+		c    imcache[string, interface{}]
 	}{
 		{
 			name: "not sharded",
@@ -1070,7 +1085,7 @@ func TestImcache_Remove_EvictionCallback(t *testing.T) {
 
 	tests := []struct {
 		name string
-		c    Imcache[string, interface{}]
+		c    imcache[string, interface{}]
 	}{
 		{
 			name: "not sharded",
@@ -1110,7 +1125,7 @@ func TestImcache_RemoveAll_EvictionCallback(t *testing.T) {
 
 	tests := []struct {
 		name string
-		c    Imcache[string, interface{}]
+		c    imcache[string, interface{}]
 	}{
 		{
 			name: "not sharded",
@@ -1145,7 +1160,7 @@ func TestImcache_RemoveStale_EvictionCallback(t *testing.T) {
 
 	tests := []struct {
 		name string
-		c    Imcache[string, interface{}]
+		c    imcache[string, interface{}]
 	}{
 		{
 			name: "not sharded",
@@ -1177,7 +1192,7 @@ func TestImcache_GetAll_EvictionCallback(t *testing.T) {
 
 	tests := []struct {
 		name string
-		c    Imcache[string, interface{}]
+		c    imcache[string, interface{}]
 	}{
 		{
 			name: "not sharded",
@@ -1235,7 +1250,7 @@ func TestImcache_StartCleaner(t *testing.T) {
 
 	tests := []struct {
 		name string
-		c    Imcache[string, interface{}]
+		c    imcache[string, interface{}]
 	}{
 		{
 			name: "not sharded",
@@ -1297,7 +1312,7 @@ func TestImcache_StopCleaner(t *testing.T) {
 
 	tests := []struct {
 		name string
-		c    Imcache[string, interface{}]
+		c    imcache[string, interface{}]
 	}{
 		{
 			name: "not sharded",
@@ -1354,7 +1369,7 @@ func TestImcache_SizeExceeded(t *testing.T) {
 
 	tests := []struct {
 		name string
-		c    Imcache[string, interface{}]
+		c    imcache[string, interface{}]
 	}{
 		{
 			name: "not sharded",
