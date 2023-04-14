@@ -35,3 +35,15 @@ func WithDefaultSlidingExpirationOption[K comparable, V any](d time.Duration) Op
 		s.sliding = true
 	})
 }
+
+// WithMaxEntriesOption returns an Option that sets the Cache maximum number of entries.
+// When the maximum number of entries is exceeded, the least recently used entry is evicted.
+//
+// If used with Sharded type, the maximum size is per shard,
+// not the total size of all shards.
+func WithMaxEntriesOption[K comparable, V any](n int) Option[K, V] {
+	return optionf[K, V](func(s *Cache[K, V]) {
+		s.size = n
+		s.queue = &fifoq[K]{}
+	})
+}

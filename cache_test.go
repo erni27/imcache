@@ -307,6 +307,41 @@ func TestImcache_GetOrSet(t *testing.T) {
 	}
 }
 
+func TestImcache_GetOrSet_SlidingExpiration(t *testing.T) {
+	tests := []struct {
+		name string
+		c    Imcache[string, string]
+	}{
+		{
+			name: "not sharded",
+			c:    New[string, string](),
+		},
+		{
+			name: "sharded",
+			c:    NewSharded[string, string](8, DefaultStringHasher64{}),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := tt.c
+			c.Set("foo", "foo", WithSlidingExpiration(500*time.Millisecond))
+			<-time.After(300 * time.Millisecond)
+			if _, ok := c.GetOrSet("foo", "bar", WithSlidingExpiration(500*time.Millisecond)); !ok {
+				t.Errorf("Cache.Get(%s) = _, %t, want _, true", "foo", ok)
+			}
+			<-time.After(300 * time.Millisecond)
+			if _, ok := c.GetOrSet("foo", "bar", WithSlidingExpiration(500*time.Millisecond)); !ok {
+				t.Errorf("Cache.Get(%s) = _, %t, want _, true", "foo", ok)
+			}
+			<-time.After(500 * time.Millisecond)
+			if _, ok := c.GetOrSet("foo", "bar", WithSlidingExpiration(500*time.Millisecond)); ok {
+				t.Errorf("Cache.Get(%s) = _, %t, want _, false", "foo", ok)
+			}
+		})
+	}
+}
+
 func TestImcache_Replace(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -823,15 +858,19 @@ func (m *evictionCallbackMock) Callback(key string, val interface{}, reason Evic
 
 func (m *evictionCallbackMock) HasBeenCalledWith(key string, val interface{}, reason EvictionReason) bool {
 	m.mu.Lock()
-	var call evictionCallbackCall
+	var calls []evictionCallbackCall
 	for _, c := range m.calls {
 		if c.key == key {
-			call = c
-			break
+			calls = append(calls, c)
 		}
 	}
 	m.mu.Unlock()
-	return call.key == key && call.val == val && call.reason == reason
+	for _, c := range calls {
+		if c.val == val && c.reason == reason {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *evictionCallbackMock) HasNotBeenCalled() bool {
@@ -1307,5 +1346,195 @@ func TestCache_ZeroValue(t *testing.T) {
 	c.Set("foo", "bar", WithNoExpiration())
 	if v, ok := c.Get("foo"); !ok || v != "bar" {
 		t.Errorf("want Cache.Get(_) = %s, true, got %s, %t", "bar", v, ok)
+	}
+}
+
+func TestImcache_SizeExceeded(t *testing.T) {
+	evictioncMock := &evictionCallbackMock{}
+
+	tests := []struct {
+		name string
+		c    Imcache[string, interface{}]
+	}{
+		{
+			name: "not sharded",
+			c:    New(WithEvictionCallbackOption(evictioncMock.Callback), WithMaxEntriesOption[string, interface{}](5)),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := tt.c
+			c.Set("one", 1, WithNoExpiration())
+			c.Set("two", 2, WithNoExpiration())
+			c.Set("three", 3, WithNoExpiration())
+			c.Set("four", 4, WithExpiration(time.Nanosecond))
+			c.Set("five", 5, WithNoExpiration())
+			// LRU queue: five -> four -> three -> two -> one.
+
+			// Set should evict the last entry from the queue if the size is exceeded.
+			c.Set("six", 6, WithNoExpiration())
+			// LRU queue: six -> five -> four -> three -> two.
+			if _, ok := c.Get("one"); ok {
+				t.Error("want Cache.Get(_) = _, false, got _, true")
+			}
+			if !evictioncMock.HasBeenCalledWith("one", 1, EvictionReasonSizeExceeded) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "one", 1, EvictionReasonSizeExceeded)
+			}
+
+			// Get should move the entry to the front of the queue.
+			if _, ok := c.Get("two"); !ok {
+				t.Error("want Cache.Get(_) = _, true, got _, false")
+			}
+			// LRU queue: two -> six -> five -> four -> three.
+			c.Set("seven", 7, WithNoExpiration())
+			// LRU queue: seven -> two -> six -> five -> four.
+			if _, ok := c.Get("three"); ok {
+				t.Error("want Cache.Get(_) = _, false, got _, true")
+			}
+			if !evictioncMock.HasBeenCalledWith("three", 3, EvictionReasonSizeExceeded) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "three", 3, EvictionReasonSizeExceeded)
+			}
+
+			// Set should evict the last entry from the queue if the size is exceeded
+			// and if the entry is expired the eviction reason should be EvictionReasonExpired.
+			c.Set("eight", 8, WithNoExpiration())
+			// LRU queue: eight -> seven -> two -> six -> five.
+			if _, ok := c.Get("four"); ok {
+				t.Error("want Cache.Get(_) = _, false, got _, true")
+			}
+			if !evictioncMock.HasBeenCalledWith("four", 4, EvictionReasonExpired) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "four", 4, EvictionReasonExpired)
+			}
+
+			// Replace should update the entry and move it to the front of the queue.
+			if ok := c.Replace("five", 5, WithNoExpiration()); !ok {
+				t.Error("want Cache.Replace(_) = true, got false")
+			}
+			// LRU queue: five -> eight -> seven -> two -> six.
+			c.Set("nine", 9, WithNoExpiration())
+			// LRU queue: nine -> five -> eight -> seven -> two.
+			if _, ok := c.Get("six"); ok {
+				t.Error("want Cache.Get(_) = _, false, got _, true")
+			}
+			if !evictioncMock.HasBeenCalledWith("six", 6, EvictionReasonSizeExceeded) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "six", 6, EvictionReasonSizeExceeded)
+			}
+
+			// ReplaceWithFunc should update the entry and move it to the front of the queue.
+			if ok := c.ReplaceWithFunc("two", func(interface{}) interface{} { return 2 }, WithNoExpiration()); !ok {
+				t.Error("want Cache.ReplaceWithFunc(_) = true, got false")
+			}
+			// LRU queue: two -> nine -> five -> eight -> seven.
+			c.Set("ten", 10, WithNoExpiration())
+			// LRU queue: ten -> two -> nine -> five -> eight.
+			if _, ok := c.Get("seven"); ok {
+				t.Error("want Cache.Get(_) = _, false, got _, true")
+			}
+			if !evictioncMock.HasBeenCalledWith("seven", 7, EvictionReasonSizeExceeded) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "seven", 7, EvictionReasonSizeExceeded)
+			}
+
+			// Set should not evict any entry if the size is not exceeded.
+			c.Set("ten", 10, WithNoExpiration())
+			// LRU queue: ten -> two -> nine -> five -> eight.
+			if _, ok := c.Get("eight"); !ok {
+				t.Error("want Cache.Get(_) = _, true, got _, false")
+			}
+			// LRU queue: eight -> ten -> two -> nine -> five.
+
+			// GetAll should not change the LRU queue.
+			c.GetAll()
+			// LRU queue: eight -> ten -> two -> nine -> five.
+			c.Set("eleven", 11, WithNoExpiration())
+			// LRU queue: eleven -> eight -> ten -> two -> nine.
+			if _, ok := c.Get("five"); ok {
+				t.Error("want Cache.Get(_) = _, false, got _, true")
+			}
+			if !evictioncMock.HasBeenCalledWith("five", 5, EvictionReasonSizeExceeded) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "five", 5, EvictionReasonSizeExceeded)
+			}
+
+			// Remove should not mess with the LRU queue.
+			if ok := c.Remove("two"); !ok {
+				t.Error("want Cache.Remove(_) = true, got false")
+			}
+			// LRU queue: eleven -> eight -> ten -> nine.
+			c.Set("twelve", 12, WithNoExpiration())
+			// LRU queue: twelve -> eleven -> eight -> ten -> nine.
+			if _, ok := c.Get("nine"); !ok {
+				t.Error("want Cache.Get(_) = _, true, got _, false")
+			}
+			// LRU queue: nine -> twelve -> eleven -> eight -> ten.
+			c.Set("thirteen", 13, WithNoExpiration())
+			// LRU queue: thirteen -> nine -> twelve -> eleven -> eight.
+			if _, ok := c.Get("ten"); ok {
+				t.Error("want Cache.Get(_) = _, false, got _, true")
+			}
+			if !evictioncMock.HasBeenCalledWith("ten", 10, EvictionReasonSizeExceeded) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "ten", 10, EvictionReasonSizeExceeded)
+			}
+
+			// RemoveAll reset the LRU queue.
+			c.RemoveAll()
+			// LRU queue: empty.
+			c.Set("fourteen", 14, WithNoExpiration())
+			c.Set("fifteen", 15, WithNoExpiration())
+			c.Set("sixteen", 16, WithExpiration(time.Nanosecond))
+			c.Set("seventeen", 17, WithNoExpiration())
+			c.Set("eighteen", 18, WithNoExpiration())
+			// LRU queue: eighteen -> seventeen -> sixteen -> fifteen -> fourteen.
+			if _, ok := c.Get("fourteen"); !ok {
+				t.Error("Cache.Get(_) = _, false, want _, true")
+			}
+			// LRU queue: fourteen -> eighteen -> seventeen -> sixteen -> fifteen.
+			c.Set("nineteen", 19, WithExpiration(time.Nanosecond))
+			// LRU queue: nineteen -> fourteen -> eighteen -> seventeen -> sixteen.
+			if _, ok := c.Get("fifteen"); ok {
+				t.Error("Cache.Get(_) = _, true, got _, false")
+			}
+			if !evictioncMock.HasBeenCalledWith("fifteen", 15, EvictionReasonSizeExceeded) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "fifteen", 15, EvictionReasonSizeExceeded)
+			}
+
+			// RemoveStale should not mess with the LRU queue.
+			c.RemoveStale()
+			// LRU queue: fourteen -> eighteen -> seventeen.
+			c.Set("twenty", 20, WithNoExpiration())
+			// LRU queue: twenty -> fourteen -> eighteen -> seventeen.
+			if _, ok := c.Get("seventeen"); !ok {
+				t.Error("Cache.Get(_) = _, false, want _, true")
+			}
+			// LRU queue: seventeen -> twenty -> fourteen -> eighteen.
+			c.Set("twentyone", 21, WithNoExpiration())
+			// LRU queue: twentyone -> seventeen -> twenty -> fourteen -> eighteen.
+			if _, ok := c.Get("eighteen"); !ok {
+				t.Error("Cache.Get(_) = _, false, got _, true")
+			}
+			// LRU queue: eighteen -> twentyone -> seventeen -> twenty -> fourteen.
+
+			// GetOrSet should cause eviction if the size is exceeded.
+			if _, ok := c.GetOrSet("twentytwo", 22, WithNoExpiration()); ok {
+				t.Error("Cache.GetOrSet(_, _, _) = _, true, want _, false")
+			}
+			// LRU queue: twentytwo -> eighteen -> twentyone -> seventeen -> twenty.
+			if _, ok := c.Get("fourteen"); ok {
+				t.Error("Cache.Get(_) = _, true, got _, false")
+			}
+			if !evictioncMock.HasBeenCalledWith("fourteen", 14, EvictionReasonSizeExceeded) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "fourteen", 14, EvictionReasonSizeExceeded)
+			}
+
+			// GetOrSet should move the entry to the front of the LRU queue.
+			if _, ok := c.GetOrSet("twenty", 20, WithNoExpiration()); !ok {
+				t.Error("Cache.GetOrSet(_, _, _) = _, false, want _, true")
+			}
+			// LRU queue: twenty -> twentytwo -> eighteen -> twentyone -> seventeen.
+			c.Set("twentythree", 23, WithNoExpiration())
+			// LRU queue: twentythree -> twenty -> twentytwo -> eighteen -> twentyone.
+			if _, ok := c.Get("seventeen"); ok {
+				t.Error("Cache.Get(_) = _, true, got _, false")
+			}
+		})
 	}
 }

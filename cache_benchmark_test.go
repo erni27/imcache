@@ -12,7 +12,7 @@ func init() {
 }
 
 func BenchmarkGet(b *testing.B) {
-	c := New[string, int]()
+	var c Cache[string, int]
 	for i := 0; i < b.N; i++ {
 		c.Set(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
 	}
@@ -20,14 +20,14 @@ func BenchmarkGet(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); !ok {
-			b.Fatalf("Get(_) = _, %t", ok)
+		if v, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); ok {
+			_ = (int)(v)
 		}
 	}
 }
 
-func BenchmarkGet_Concurrent(b *testing.B) {
-	c := New[string, int]()
+func BenchmarkGet_Parallel(b *testing.B) {
+	var c Cache[string, int]
 	for i := 0; i < b.N; i++ {
 		c.Set(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
 	}
@@ -36,15 +36,15 @@ func BenchmarkGet_Concurrent(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			if _, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); !ok {
-				b.Fatalf("Get(_) = _, %t", ok)
+			if v, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); ok {
+				_ = (int)(v)
 			}
 		}
 	})
 }
 
 func BenchmarkGet_Sharded(b *testing.B) {
-	for _, n := range []int{2, 4, 8, 16, 32, 64, 128, 256, 512, 1024} {
+	for _, n := range []int{2, 4, 8, 16, 32, 64, 128} {
 		b.Run(fmt.Sprintf("%d shards", n), func(b *testing.B) {
 			c := NewSharded[string, int](n, DefaultStringHasher64{})
 			for i := 0; i < b.N; i++ {
@@ -54,16 +54,16 @@ func BenchmarkGet_Sharded(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				if _, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); !ok {
-					b.Fatalf("Get(_) = _, %t", ok)
+				if v, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); ok {
+					_ = (int)(v)
 				}
 			}
 		})
 	}
 }
 
-func BenchmarkGet_Sharded_Concurrent(b *testing.B) {
-	for _, n := range []int{2, 4, 8, 16, 32, 64, 128, 256, 512, 1024} {
+func BenchmarkGet_Sharded_Parallel(b *testing.B) {
+	for _, n := range []int{2, 4, 8, 16, 32, 64, 128} {
 		b.Run(fmt.Sprintf("%d shards", n), func(b *testing.B) {
 			c := NewSharded[string, int](n, DefaultStringHasher64{})
 			for i := 0; i < b.N; i++ {
@@ -74,8 +74,8 @@ func BenchmarkGet_Sharded_Concurrent(b *testing.B) {
 			b.ResetTimer()
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
-					if _, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); !ok {
-						b.Fatalf("Get(_) = _, %t", ok)
+					if v, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); ok {
+						_ = (int)(v)
 					}
 				}
 			})
@@ -83,19 +83,50 @@ func BenchmarkGet_Sharded_Concurrent(b *testing.B) {
 	}
 }
 
-func BenchmarkSet(b *testing.B) {
-	c := New[string, int]()
+func BenchmarkGet_MaxEntriesLimit(b *testing.B) {
+	c := New(WithMaxEntriesOption[string, int](b.N))
+	for i := 0; i < b.N; i++ {
+		c.Set(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
+	}
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		i := rand.Intn(b.N)
-		c.Set(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
+		if v, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); ok {
+			_ = (int)(v)
+		}
 	}
 }
 
-func BenchmarkSet_Concurrent(b *testing.B) {
-	c := New[string, int]()
+func BenchmarkGet_MaxEntriesLimit_Parallel(b *testing.B) {
+	c := New(WithMaxEntriesOption[string, int](b.N))
+	for i := 0; i < b.N; i++ {
+		c.Set(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			if v, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); ok {
+				_ = (int)(v)
+			}
+		}
+	})
+}
+
+func BenchmarkSet(b *testing.B) {
+	var c Cache[string, int]
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		c.Set(fmt.Sprintf("key-%d", rand.Intn(b.N)), i, WithNoExpiration())
+	}
+}
+
+func BenchmarkSet_Parallel(b *testing.B) {
+	var c Cache[string, int]
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -108,22 +139,21 @@ func BenchmarkSet_Concurrent(b *testing.B) {
 }
 
 func BenchmarkSet_Sharded(b *testing.B) {
-	for _, n := range []int{2, 4, 8, 16, 32, 64, 128, 256, 512, 1024} {
+	for _, n := range []int{2, 4, 8, 16, 32, 64, 128} {
 		b.Run(fmt.Sprintf("%d shards", n), func(b *testing.B) {
 			c := NewSharded[string, int](n, DefaultStringHasher64{})
 
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				i := rand.Intn(b.N)
-				c.Set(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
+				c.Set(fmt.Sprintf("key-%d", rand.Intn(b.N)), i, WithNoExpiration())
 			}
 		})
 	}
 }
 
-func BenchmarkSet_Sharded_Concurrent(b *testing.B) {
-	for _, n := range []int{2, 4, 8, 16, 32, 64, 128, 256, 512, 1024} {
+func BenchmarkSet_Sharded_Parallel(b *testing.B) {
+	for _, n := range []int{2, 4, 8, 16, 32, 64, 128} {
 		b.Run(fmt.Sprintf("%d shards", n), func(b *testing.B) {
 			c := NewSharded[string, int](n, DefaultStringHasher64{})
 
@@ -139,8 +169,28 @@ func BenchmarkSet_Sharded_Concurrent(b *testing.B) {
 	}
 }
 
-var val int
-var ok bool
+func BenchmarkSet_MaxEntriesLimit(b *testing.B) {
+	c := New(WithMaxEntriesOption[string, int](b.N / 2))
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		c.Set(fmt.Sprintf("key-%d", rand.Intn(b.N)), i, WithNoExpiration())
+	}
+}
+
+func BenchmarkSet_MaxEntriesLimit_Parallel(b *testing.B) {
+	c := New(WithMaxEntriesOption[string, int](b.N / 2))
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			i := rand.Intn(b.N)
+			c.Set(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
+		}
+	})
+}
 
 func BenchmarkGetOrSet(b *testing.B) {
 	c := New[string, int]()
@@ -149,11 +199,14 @@ func BenchmarkGetOrSet(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		i := rand.Intn(b.N)
-		val, ok = c.GetOrSet(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
+		v, ok := c.GetOrSet(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
+		if ok {
+			_ = (int)(v)
+		}
 	}
 }
 
-func BenchmarkGetOrSet_Concurrent(b *testing.B) {
+func BenchmarkGetOrSet_Parallel(b *testing.B) {
 	c := New[string, int]()
 
 	b.ReportAllocs()
@@ -161,7 +214,10 @@ func BenchmarkGetOrSet_Concurrent(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			i := rand.Intn(b.N)
-			val, ok = c.GetOrSet(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
+			v, ok := c.GetOrSet(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
+			if ok {
+				_ = (int)(v)
+			}
 		}
 	})
 }
@@ -175,13 +231,16 @@ func BenchmarkGetOrSet_Sharded(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				i := rand.Intn(b.N)
-				val, ok = c.GetOrSet(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
+				v, ok := c.GetOrSet(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
+				if ok {
+					_ = (int)(v)
+				}
 			}
 		})
 	}
 }
 
-func BenchmarkGetOrSet_Sharded_Concurrent(b *testing.B) {
+func BenchmarkGetOrSet_Sharded_Parallel(b *testing.B) {
 	for _, n := range []int{2, 4, 8, 16, 32, 64, 128, 256, 512, 1024} {
 		b.Run(fmt.Sprintf("%d shards", n), func(b *testing.B) {
 			c := NewSharded[string, int](n, DefaultStringHasher64{})
@@ -191,7 +250,10 @@ func BenchmarkGetOrSet_Sharded_Concurrent(b *testing.B) {
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
 					i := rand.Intn(b.N)
-					val, ok = c.GetOrSet(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
+					v, ok := c.GetOrSet(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
+					if ok {
+						_ = (int)(v)
+					}
 				}
 			})
 		})
