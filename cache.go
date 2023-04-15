@@ -452,7 +452,6 @@ func (c *Cache[K, V]) Len() int {
 
 // StartCleaner starts a cleaner that periodically removes expired entries.
 // A cleaner runs in a separate goroutine.
-// It's a NOP method if the cleaner is already running.
 // It returns an error if the cleaner is already running
 // or if the interval is less than or equal to zero.
 //
@@ -643,7 +642,6 @@ func (s *Sharded[K, V]) Len() int {
 
 // StartCleaner starts a cleaner that periodically removes expired entries.
 // A cleaner runs in a separate goroutine.
-// It's a NOP method if the cleaner is already running.
 // It returns an error if the cleaner is already running
 // or if the interval is less than or equal to zero.
 //

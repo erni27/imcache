@@ -16,23 +16,29 @@ func (f optionf[K, V]) apply(c *Cache[K, V]) {
 
 // WithEvictionCallbackOption returns an Option that sets the Cache eviction callback.
 func WithEvictionCallbackOption[K comparable, V any](f EvictionCallback[K, V]) Option[K, V] {
-	return optionf[K, V](func(s *Cache[K, V]) {
-		s.onEviction = f
+	return optionf[K, V](func(c *Cache[K, V]) {
+		c.onEviction = f
 	})
 }
 
 // WithDefaultExpirationOption returns an Option that sets the Cache default expiration.
 func WithDefaultExpirationOption[K comparable, V any](d time.Duration) Option[K, V] {
-	return optionf[K, V](func(s *Cache[K, V]) {
-		s.defaultExp = d
+	return optionf[K, V](func(c *Cache[K, V]) {
+		if d <= 0 {
+			return
+		}
+		c.defaultExp = d
 	})
 }
 
 // WithDefaultSlidingExpirationOption returns an Option that sets the Cache default sliding expiration.
 func WithDefaultSlidingExpirationOption[K comparable, V any](d time.Duration) Option[K, V] {
-	return optionf[K, V](func(s *Cache[K, V]) {
-		s.defaultExp = d
-		s.sliding = true
+	return optionf[K, V](func(c *Cache[K, V]) {
+		if d <= 0 {
+			return
+		}
+		c.defaultExp = d
+		c.sliding = true
 	})
 }
 
@@ -42,8 +48,11 @@ func WithDefaultSlidingExpirationOption[K comparable, V any](d time.Duration) Op
 // If used with Sharded type, the maximum size is per shard,
 // not the total size of all shards.
 func WithMaxEntriesOption[K comparable, V any](n int) Option[K, V] {
-	return optionf[K, V](func(s *Cache[K, V]) {
-		s.size = n
-		s.queue = &fifoq[K]{}
+	return optionf[K, V](func(c *Cache[K, V]) {
+		if n <= 0 {
+			return
+		}
+		c.size = n
+		c.queue = &fifoq[K]{}
 	})
 }
