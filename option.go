@@ -24,6 +24,9 @@ func WithEvictionCallbackOption[K comparable, V any](f EvictionCallback[K, V]) O
 // WithDefaultExpirationOption returns an Option that sets the Cache default expiration.
 func WithDefaultExpirationOption[K comparable, V any](d time.Duration) Option[K, V] {
 	return optionf[K, V](func(s *Cache[K, V]) {
+		if d <= 0 {
+			return
+		}
 		s.defaultExp = d
 	})
 }
@@ -31,6 +34,9 @@ func WithDefaultExpirationOption[K comparable, V any](d time.Duration) Option[K,
 // WithDefaultSlidingExpirationOption returns an Option that sets the Cache default sliding expiration.
 func WithDefaultSlidingExpirationOption[K comparable, V any](d time.Duration) Option[K, V] {
 	return optionf[K, V](func(s *Cache[K, V]) {
+		if d <= 0 {
+			return
+		}
 		s.defaultExp = d
 		s.sliding = true
 	})
@@ -43,6 +49,9 @@ func WithDefaultSlidingExpirationOption[K comparable, V any](d time.Duration) Op
 // not the total size of all shards.
 func WithMaxEntriesOption[K comparable, V any](n int) Option[K, V] {
 	return optionf[K, V](func(s *Cache[K, V]) {
+		if n <= 0 {
+			return
+		}
 		s.size = n
 		s.queue = &fifoq[K]{}
 	})
