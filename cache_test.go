@@ -1398,8 +1398,8 @@ func TestCache_MaxEntries(t *testing.T) {
 	if _, ok := c.Get("one"); ok {
 		t.Error("want Cache.Get(_) = _, false, got _, true")
 	}
-	if !evictioncMock.HasBeenCalledWith("one", 1, EvictionReasonSizeExceeded) {
-		t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "one", 1, EvictionReasonSizeExceeded)
+	if !evictioncMock.HasBeenCalledWith("one", 1, EvictionReasonMaxEntriesExceeded) {
+		t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "one", 1, EvictionReasonMaxEntriesExceeded)
 	}
 
 	// Get should move the entry to the front of the queue.
@@ -1412,8 +1412,8 @@ func TestCache_MaxEntries(t *testing.T) {
 	if _, ok := c.Get("three"); ok {
 		t.Error("want Cache.Get(_) = _, false, got _, true")
 	}
-	if !evictioncMock.HasBeenCalledWith("three", 3, EvictionReasonSizeExceeded) {
-		t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "three", 3, EvictionReasonSizeExceeded)
+	if !evictioncMock.HasBeenCalledWith("three", 3, EvictionReasonMaxEntriesExceeded) {
+		t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "three", 3, EvictionReasonMaxEntriesExceeded)
 	}
 
 	// Set should evict the last entry from the queue if the size is exceeded
@@ -1437,8 +1437,8 @@ func TestCache_MaxEntries(t *testing.T) {
 	if _, ok := c.Get("six"); ok {
 		t.Error("want Cache.Get(_) = _, false, got _, true")
 	}
-	if !evictioncMock.HasBeenCalledWith("six", 6, EvictionReasonSizeExceeded) {
-		t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "six", 6, EvictionReasonSizeExceeded)
+	if !evictioncMock.HasBeenCalledWith("six", 6, EvictionReasonMaxEntriesExceeded) {
+		t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "six", 6, EvictionReasonMaxEntriesExceeded)
 	}
 
 	// ReplaceWithFunc should update the entry and move it to the front of the queue.
@@ -1451,8 +1451,8 @@ func TestCache_MaxEntries(t *testing.T) {
 	if _, ok := c.Get("seven"); ok {
 		t.Error("want Cache.Get(_) = _, false, got _, true")
 	}
-	if !evictioncMock.HasBeenCalledWith("seven", 7, EvictionReasonSizeExceeded) {
-		t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "seven", 7, EvictionReasonSizeExceeded)
+	if !evictioncMock.HasBeenCalledWith("seven", 7, EvictionReasonMaxEntriesExceeded) {
+		t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "seven", 7, EvictionReasonMaxEntriesExceeded)
 	}
 
 	// Set should not evict any entry if the size is not exceeded.
@@ -1471,8 +1471,8 @@ func TestCache_MaxEntries(t *testing.T) {
 	if _, ok := c.Get("five"); ok {
 		t.Error("want Cache.Get(_) = _, false, got _, true")
 	}
-	if !evictioncMock.HasBeenCalledWith("five", 5, EvictionReasonSizeExceeded) {
-		t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "five", 5, EvictionReasonSizeExceeded)
+	if !evictioncMock.HasBeenCalledWith("five", 5, EvictionReasonMaxEntriesExceeded) {
+		t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "five", 5, EvictionReasonMaxEntriesExceeded)
 	}
 
 	// Remove should not mess with the LRU queue.
@@ -1491,8 +1491,8 @@ func TestCache_MaxEntries(t *testing.T) {
 	if _, ok := c.Get("ten"); ok {
 		t.Error("want Cache.Get(_) = _, false, got _, true")
 	}
-	if !evictioncMock.HasBeenCalledWith("ten", 10, EvictionReasonSizeExceeded) {
-		t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "ten", 10, EvictionReasonSizeExceeded)
+	if !evictioncMock.HasBeenCalledWith("ten", 10, EvictionReasonMaxEntriesExceeded) {
+		t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "ten", 10, EvictionReasonMaxEntriesExceeded)
 	}
 
 	// RemoveAll reset the LRU queue.
@@ -1513,8 +1513,8 @@ func TestCache_MaxEntries(t *testing.T) {
 	if _, ok := c.Get("fifteen"); ok {
 		t.Error("Cache.Get(_) = _, true, got _, false")
 	}
-	if !evictioncMock.HasBeenCalledWith("fifteen", 15, EvictionReasonSizeExceeded) {
-		t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "fifteen", 15, EvictionReasonSizeExceeded)
+	if !evictioncMock.HasBeenCalledWith("fifteen", 15, EvictionReasonMaxEntriesExceeded) {
+		t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "fifteen", 15, EvictionReasonMaxEntriesExceeded)
 	}
 
 	// RemoveStale should not mess with the LRU queue.
@@ -1541,8 +1541,8 @@ func TestCache_MaxEntries(t *testing.T) {
 	if _, ok := c.Get("fourteen"); ok {
 		t.Error("Cache.Get(_) = _, true, got _, false")
 	}
-	if !evictioncMock.HasBeenCalledWith("fourteen", 14, EvictionReasonSizeExceeded) {
-		t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "fourteen", 14, EvictionReasonSizeExceeded)
+	if !evictioncMock.HasBeenCalledWith("fourteen", 14, EvictionReasonMaxEntriesExceeded) {
+		t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "fourteen", 14, EvictionReasonMaxEntriesExceeded)
 	}
 
 	// GetOrSet should move the entry to the front of the LRU queue.

@@ -4,15 +4,21 @@ package imcache
 type EvictionReason int32
 
 const (
-	// EvictionReasonExpired indicates that the entry was evicted because it expired.
+	// EvictionReasonExpired indicates that the entry was evicted
+	// because it expired.
 	EvictionReasonExpired EvictionReason = iota + 1
-	// EvictionReasonRemoved indicates that the entry was evicted because it was removed.
+	// EvictionReasonRemoved indicates that the entry was evicted
+	// because it was removed.
 	EvictionReasonRemoved
-	// EvictionReasonReplaced indicates that the entry was evicted because it was replaced.
+	// EvictionReasonReplaced indicates that the entry was evicted
+	// because it was replaced.
 	EvictionReasonReplaced
-	// EvictionReasonSizeExceeded indicates that the entry was evicted because the cache size exceeded.
-	// imcache uses LRU eviction policy when the cache size exceeds the maximum size.
-	EvictionReasonSizeExceeded
+	// EvictionReasonMaxEntriesExceeded indicates that the entry was evicted
+	// because the max entries limit was exceeded.
+	//
+	// imcache uses LRU eviction policy when the cache exceeds
+	// the max entries limit regardless of the entry expiration time.
+	EvictionReasonMaxEntriesExceeded
 )
 
 func (r EvictionReason) String() string {
@@ -23,12 +29,13 @@ func (r EvictionReason) String() string {
 		return "removed"
 	case EvictionReasonReplaced:
 		return "replaced"
-	case EvictionReasonSizeExceeded:
+	case EvictionReasonMaxEntriesExceeded:
 		return "size exceeded"
 	default:
 		return "unknown"
 	}
 }
 
-// EvictionCallback is the callback function that is called when an entry is evicted.
+// EvictionCallback is the callback function that is called when an entry
+// is evicted.
 type EvictionCallback[K comparable, V any] func(key K, val V, reason EvictionReason)
