@@ -70,7 +70,7 @@ c2.Set(1, "one", imcache.WithDefaultExpiration())
 
 ### Key eviction
 
-`imcache` follows very naive and simple eviction approach. If an expired entry is accessed by any `Cache` method, it is removed from the cache. The exception is the max entries limit. If the max entries limit is set, the cache  evicts the least recently used entry when the max entries limit is reached regardless of the expiration time. More on limiting the max number of entries in the cache can be found in the [Max entries limit](#max-entries-limit) section.
+`imcache` follows very naive and simple eviction approach. If an expired entry is accessed by any `Cache` method, it is removed from the cache. The exception is the max entries limit. If the max entries limit is set, the cache  evicts the least recently used entry when the max entries limit is reached regardless of its expiration time. More on limiting the max number of entries in the cache can be found in the [Max entries limit](#max-entries-limit) section.
 
 It is possible to use the `Cleaner` to periodically remove expired entries from the cache. The `Cleaner` is a background goroutine that periodically removes expired entries from the cache. The `Cleaner` is disabled by default. You can enable it by calling the `StartCleaner` method. The `Cleaner` can be stopped by calling the `StopCleaner` method.
 
