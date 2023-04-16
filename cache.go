@@ -15,9 +15,9 @@ import (
 
 // New returns a new Cache instance.
 //
-// By default a returned Cache has no default expiration,
-// no default sliding expiration, no entry limit
-// and no eviction callback.
+// By default a returned Cache has no default expiration, no default sliding
+// expiration, no entry limit and no eviction callback.
+//
 // Option(s) can be used to customize the returned Cache.
 func New[K comparable, V any](opts ...Option[K, V]) *Cache[K, V] {
 	s := &Cache[K, V]{
@@ -108,8 +108,9 @@ func (c *Cache[K, V]) Get(key K) (V, bool) {
 //
 // If it encounters an expired entry, it is evicted and a new entry is added.
 //
-// If you don't want to replace an existing entry, use the GetOrSet method instead.
-// If you don't want to add a new entry if it doesn't exist, use the Replace method instead.
+// If you don't want to replace an existing entry, use the GetOrSet method
+// instead. If you don't want to add a new entry if it doesn't exist, use
+// the Replace method instead.
 func (c *Cache[K, V]) Set(key K, val V, exp Expiration) {
 	now := time.Now()
 	entry := entry[K, V]{val: val}
@@ -149,12 +150,13 @@ func (c *Cache[K, V]) Set(key K, val V, exp Expiration) {
 	if toevict.HasExpired(now) {
 		c.onEviction(node.key, toevict.val, EvictionReasonExpired)
 	} else {
-		c.onEviction(node.key, toevict.val, EvictionReasonSizeExceeded)
+		c.onEviction(node.key, toevict.val, EvictionReasonMaxEntriesExceeded)
 	}
 }
 
 // GetOrSet returns the value for the given key and true if it exists,
-// otherwise it sets the value for the given key and returns the set value and false.
+// otherwise it sets the value for the given key and returns the set value
+// and false.
 //
 // If it encounters an expired entry, the expired entry is evicted.
 func (c *Cache[K, V]) GetOrSet(key K, val V, exp Expiration) (V, bool) {
@@ -185,7 +187,7 @@ func (c *Cache[K, V]) GetOrSet(key K, val V, exp Expiration) (V, bool) {
 		if toevict.HasExpired(now) {
 			c.onEviction(node.key, toevict.val, EvictionReasonExpired)
 		} else {
-			c.onEviction(node.key, toevict.val, EvictionReasonSizeExceeded)
+			c.onEviction(node.key, toevict.val, EvictionReasonMaxEntriesExceeded)
 		}
 		return val, false
 	}
@@ -209,7 +211,8 @@ func (c *Cache[K, V]) GetOrSet(key K, val V, exp Expiration) (V, bool) {
 }
 
 // Replace replaces the value for the given key.
-// It returns true if the value is present and replaced, otherwise it returns false.
+// It returns true if the value is present and replaced, otherwise it returns
+// false.
 //
 // If it encounters an expired entry, the expired entry is evicted.
 //
@@ -244,14 +247,15 @@ func (c *Cache[K, V]) Replace(key K, val V, exp Expiration) bool {
 	return true
 }
 
-// ReplaceWithFunc replaces the value for the given key
-// with the result of the given function that takes the old value as an argument.
-// It returns true if the value is present and replaced, otherwise it returns false.
+// ReplaceWithFunc replaces the value for the given key with the result
+// of the given function that takes the old value as an argument.
+// It returns true if the value is present and replaced, otherwise it returns
+// false.
 //
 // If it encounters an expired entry, the expired entry is evicted.
 //
-// If you want to replace the value with a new value not depending on the old value,
-// use the Replace method instead.
+// If you want to replace the value with a new value not depending on the old
+// value, use the Replace method instead.
 //
 // imcache provides the Increment and Decrement functions that can be used as f
 // to increment or decrement the old numeric type value.
@@ -478,8 +482,8 @@ func (c *Cache[K, V]) StopCleaner() {
 // no eviction callback.
 //
 // Option(s) can be used to customize the returned Sharded.
-// Note that Option(s) are applied to each shard not to
-// Sharded instance itself.
+// Note that Option(s) are applied to each shard (Cache instance)
+// not to the Sharded instance itself.
 func NewSharded[K comparable, V any](n int, hasher Hasher64[K], opts ...Option[K, V]) *Sharded[K, V] {
 	if n <= 0 {
 		panic("imcache: number of shards must be greater than 0")
@@ -543,14 +547,16 @@ func (s *Sharded[K, V]) Get(key K) (V, bool) {
 //
 // If it encounters an expired entry, it is evicted and a new entry is added.
 //
-// If you don't want to replace an existing entry, use the GetOrSet method instead.
-// If you don't want to add a new entry if it doesn't exist, use the Replace method instead.
+// If you don't want to replace an existing entry, use the GetOrSet method
+// instead. If you don't want to add a new entry if it doesn't exist, use
+// the Replace method instead.
 func (s *Sharded[K, V]) Set(key K, val V, exp Expiration) {
 	s.shard(key).Set(key, val, exp)
 }
 
 // GetOrSet returns the value for the given key and true if it exists,
-// otherwise it sets the value for the given key and returns the set value and false.
+// otherwise it sets the value for the given key and returns the set value
+// and false.
 //
 // If it encounters an expired entry, the expired entry is evicted.
 func (s *Sharded[K, V]) GetOrSet(key K, val V, exp Expiration) (v V, present bool) {
@@ -558,7 +564,8 @@ func (s *Sharded[K, V]) GetOrSet(key K, val V, exp Expiration) (v V, present boo
 }
 
 // Replace replaces the value for the given key.
-// It returns true if the value is present and replaced, otherwise it returns false.
+// It returns true if the value is present and replaced, otherwise it returns
+// false.
 //
 // If it encounters an expired entry, the expired entry is evicted.
 //
@@ -567,14 +574,15 @@ func (s *Sharded[K, V]) Replace(key K, val V, exp Expiration) bool {
 	return s.shard(key).Replace(key, val, exp)
 }
 
-// ReplaceWithFunc replaces the value for the given key
-// with the result of the given function that takes the old value as an argument.
-// It returns true if the value is present and replaced, otherwise it returns false.
+// ReplaceWithFunc replaces the value for the given key with the result
+// of the given function that takes the old value as an argument.
+// It returns true if the value is present and replaced, otherwise it returns
+// false.
 //
 // If it encounters an expired entry, the expired entry is evicted.
 //
-// If you want to replace the value with a new value not depending on the old value,
-// use the Replace method instead.
+// If you want to replace the value with a new value not depending on the old
+// value, use the Replace method instead.
 //
 // imcache provides the Increment and Decrement functions that can be used as f
 // to increment or decrement the old numeric type value.

@@ -70,7 +70,7 @@ c2.Set(1, "one", imcache.WithDefaultExpiration())
 
 ### Key eviction
 
-`imcache` follows very naive and simple eviction approach. If an expired entry is accessed by any `Cache` method, it is removed from the cache. The exception is the max entries limit. If the max entries limit is set, the cache  evicts the least recently used entry when the max entries limit is reached regardless of the expiration time. More on limiting the max number of entries in the cache can be found in the [Max entries limit](#max-entries-limit) section.
+`imcache` follows very naive and simple eviction approach. If an expired entry is accessed by any `Cache` method, it is removed from the cache. The exception is the max entries limit. If the max entries limit is set, the cache  evicts the least recently used entry when the max entries limit is reached regardless of its expiration time. More on limiting the max number of entries in the cache can be found in the [Max entries limit](#max-entries-limit) section.
 
 It is possible to use the `Cleaner` to periodically remove expired entries from the cache. The `Cleaner` is a background goroutine that periodically removes expired entries from the cache. The `Cleaner` is disabled by default. You can enable it by calling the `StartCleaner` method. The `Cleaner` can be stopped by calling the `StopCleaner` method.
 
@@ -115,9 +115,9 @@ func main() {
 
 ### Max entries limit
 
-`imcache` supports max entries limit. If the max entries limit is set, the cache evicts the least recently used entry when the max entries limit is reached regardless of the expiration time.
+`imcache` supports max entries limit. If the max entries limit is set, the cache evicts the least recently used entry when the max entries limit is reached. The least recently used entry is evicted regardless of the entry's expiration time. This allows `imcache` to remain simple and efficient.
 
-LRU eviction is implemented using a doubly linked list. The list is ordered by the time of the last access to the entry. The most recently used entry is always at the head of the list. The least recently used entry is always at the tail of the list. It means that if the max entries limit is set, `Cache` maintains another data structure in addition to the map of entries. It increases the memory usage and slightly decreases the write performance.
+LRU eviction is implemented using a doubly linked list. The list is ordered by the time of the last access to the entry. The most recently used entry is always at the head of the list. The least recently used entry is always at the tail of the list. It means that if the max entries limit is set, `Cache` maintains another data structure in addition to the map of entries. As a result, memory usage icreases.
 
 The max entries limit can be configured when creating a new `Cache` instance.
 
@@ -137,4 +137,4 @@ A `Sharded` instance can be created by calling the `NewSharded` method. It accep
 c := imcache.NewSharded[string, string](4, imcache.DefaultStringHasher64{})
 ```
 
-All previous examples apply to `Sharded` type as well. Note that `Option`(s) are applied to each shard not to the `Sharded` instance itself.
+All previous examples apply to `Sharded` type as well. Note that `Option`(s) are applied to each shard (`Cache` instance) not to the `Sharded` instance itself.

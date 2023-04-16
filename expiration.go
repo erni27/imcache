@@ -23,7 +23,8 @@ func (f expirationf) apply(e *expiration) {
 	f(e)
 }
 
-// WithExpiration returns an Expiration that sets the expiration time to now + d.
+// WithExpiration returns an Expiration that sets the expiration time
+// to now + d.
 func WithExpiration(d time.Duration) Expiration {
 	return expirationf(func(e *expiration) {
 		e.date = time.Now().Add(d).UnixNano()
@@ -46,15 +47,16 @@ func WithSlidingExpiration(d time.Duration) Expiration {
 	})
 }
 
-// WithNoExpiration returns an Expiration that sets the expiration time to never expire.
+// WithNoExpiration returns an Expiration that sets the expiration time
+// to never expire.
 func WithNoExpiration() Expiration {
 	return expirationf(func(e *expiration) {
 		e.date = noExp
 	})
 }
 
-// WithDefaultExpiration returns an Expiration that sets the expiration time to the
-// default expiration time.
+// WithDefaultExpiration returns an Expiration that sets the expiration time
+// to the default expiration time.
 func WithDefaultExpiration() Expiration {
 	return expirationf(func(e *expiration) {
 		e.date = defaultExp
