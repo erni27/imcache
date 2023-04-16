@@ -357,7 +357,7 @@ func (c *Cache[K, V]) RemoveAll() {
 	c.removeAll(time.Now())
 }
 
-func (c *Cache[K, V]) removeStale(now time.Time) {
+func (c *Cache[K, V]) removeExpired(now time.Time) {
 	c.mu.Lock()
 	// To avoid copying the expired entries if there's no eviction callback.
 	if c.onEviction == nil {
@@ -383,11 +383,11 @@ func (c *Cache[K, V]) removeStale(now time.Time) {
 	}
 }
 
-// RemoveStale removes all expired entries.
+// RemoveExpired removes all expired entries.
 //
 // If an eviction callback is set, it is called for each removed entry.
-func (c *Cache[K, V]) RemoveStale() {
-	c.removeStale(time.Now())
+func (c *Cache[K, V]) RemoveExpired() {
+	c.removeExpired(time.Now())
 }
 
 type kv[K comparable, V any] struct {
@@ -622,13 +622,13 @@ func (s *Sharded[K, V]) RemoveAll() {
 	}
 }
 
-// RemoveStale removes all expired entries.
+// RemoveExpired removes all expired entries.
 //
 // If an eviction callback is set, it is called for each removed entry.
-func (s *Sharded[K, V]) RemoveStale() {
+func (s *Sharded[K, V]) RemoveExpired() {
 	now := time.Now()
 	for _, shard := range s.shards {
-		shard.removeStale(now)
+		shard.removeExpired(now)
 	}
 }
 

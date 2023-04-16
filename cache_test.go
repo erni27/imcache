@@ -21,7 +21,7 @@ type imcache[K comparable, V any] interface {
 	ReplaceWithFunc(key K, f func(old V) (new V), exp Expiration) (present bool)
 	Remove(key K) (present bool)
 	RemoveAll()
-	RemoveStale()
+	RemoveExpired()
 	GetAll() map[K]V
 	Len() int
 	StartCleaner(interval time.Duration) error
@@ -656,7 +656,7 @@ func TestImcache_RemoveAll(t *testing.T) {
 	}
 }
 
-func TestImcache_RemoveStale(t *testing.T) {
+func TestImcache_RemoveExpired(t *testing.T) {
 	tests := []struct {
 		name string
 		c    imcache[string, string]
@@ -677,7 +677,7 @@ func TestImcache_RemoveStale(t *testing.T) {
 			c.Set("foo", "foo", WithNoExpiration())
 			c.Set("bar", "bar", WithExpiration(time.Nanosecond))
 			<-time.After(time.Nanosecond)
-			c.RemoveStale()
+			c.RemoveExpired()
 			if _, ok := c.Get("foo"); !ok {
 				t.Errorf("Cache.Get(%s) = _, %t, want _, true", "foo", ok)
 			}
@@ -1172,7 +1172,7 @@ func TestImcache_RemoveAll_EvictionCallback(t *testing.T) {
 	}
 }
 
-func TestImcache_RemoveStale_EvictionCallback(t *testing.T) {
+func TestImcache_RemoveExpired_EvictionCallback(t *testing.T) {
 	evictioncMock := &evictionCallbackMock{}
 
 	tests := []struct {
@@ -1196,7 +1196,7 @@ func TestImcache_RemoveStale_EvictionCallback(t *testing.T) {
 			c.Set("foo", "foo", WithExpiration(time.Nanosecond))
 			c.Set("bar", "bar", WithNoExpiration())
 			<-time.After(time.Nanosecond)
-			c.RemoveStale()
+			c.RemoveExpired()
 			if !evictioncMock.HasBeenCalledWith("foo", "foo", EvictionReasonExpired) {
 				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "foo", "foo", EvictionReasonExpired)
 			}
@@ -1517,8 +1517,8 @@ func TestCache_MaxEntries(t *testing.T) {
 		t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "fifteen", 15, EvictionReasonMaxEntriesExceeded)
 	}
 
-	// RemoveStale should not mess with the LRU queue.
-	c.RemoveStale()
+	// RemoveExpired should not mess with the LRU queue.
+	c.RemoveExpired()
 	// LRU queue: fourteen -> eighteen -> seventeen.
 	c.Set("twenty", 20, WithNoExpiration())
 	// LRU queue: twenty -> fourteen -> eighteen -> seventeen.

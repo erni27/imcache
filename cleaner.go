@@ -6,9 +6,9 @@ import (
 	"time"
 )
 
-// remover is an interface that wraps the RemoveStale method.
-type remover interface {
-	RemoveStale()
+// eremover is an interface that wraps the RemoveExpired method.
+type eremover interface {
+	RemoveExpired()
 }
 
 func newCleaner() *cleaner {
@@ -25,7 +25,7 @@ type cleaner struct {
 	doneCh  chan struct{}
 }
 
-func (c *cleaner) start(r remover, interval time.Duration) error {
+func (c *cleaner) start(r eremover, interval time.Duration) error {
 	if interval <= 0 {
 		return errors.New("imcache: interval must be greater than 0")
 	}
@@ -44,7 +44,7 @@ func (c *cleaner) start(r remover, interval time.Duration) error {
 		for {
 			select {
 			case <-ticker.C:
-				r.RemoveStale()
+				r.RemoveExpired()
 			case <-c.stopCh:
 				close(c.doneCh)
 				return
