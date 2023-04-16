@@ -16,8 +16,9 @@ const (
 	// EvictionReasonMaxEntriesExceeded indicates that the entry was evicted
 	// because the max entries limit was exceeded.
 	//
-	// imcache uses LRU eviction policy when the cache exceeds
-	// the max entries limit regardless of the entry expiration time.
+	// imcache uses LRU eviction policy when the cache exceeds the max entries
+	// limit. The least recently used entry is evicted regardless of the
+	// entry's expiration time.
 	EvictionReasonMaxEntriesExceeded
 )
 

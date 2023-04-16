@@ -47,7 +47,7 @@ func WithDefaultSlidingExpirationOption[K comparable, V any](d time.Duration) Op
 
 // WithMaxEntriesOption returns an Option that sets the Cache maximum number
 // of entries. When the maximum number of entries is exceeded, the least
-// recently used entry is evicted regardless of the entry expiration time.
+// recently used entry is evicted regardless of the entry's expiration time.
 //
 // If used with Sharded type, the maximum size is per shard,
 // not the total size of all shards.
