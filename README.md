@@ -117,7 +117,7 @@ func main() {
 
 `imcache` supports max entries limit. If the max entries limit is set, the cache evicts the least recently used entry when the max entries limit is reached. The least recently used entry is evicted regardless of the entry's expiration time. This allows `imcache` to remain simple and efficient.
 
-LRU eviction is implemented using a doubly linked list. The list is ordered by the time of the last access to the entry. The most recently used entry is always at the head of the list. The least recently used entry is always at the tail of the list. It means that if the max entries limit is set, `Cache` maintains another data structure in addition to the map of entries. As a result, memory usage icreases.
+LRU eviction is implemented using a doubly linked list. The list is ordered by the time of the last access to the entry. The most recently used entry is always at the head of the list. The least recently used entry is always at the tail of the list. It means that if the max entries limit is set, `Cache` maintains another data structure in addition to the map of entries. As a result, it increases memory usage and slightly decreases performance.
 
 The max entries limit can be configured when creating a new `Cache` instance.
 
@@ -138,3 +138,107 @@ c := imcache.NewSharded[string, string](4, imcache.DefaultStringHasher64{})
 ```
 
 All previous examples apply to `Sharded` type as well. Note that `Option`(s) are applied to each shard (`Cache` instance) not to the `Sharded` instance itself.
+
+## Performance
+
+`imcache` is designed to be simple and efficient. It uses a vanilla Go map to store entries and double linked list to maintain LRU order (if max entries limit is set).
+
+`imcache` was compared to the vanilla Go map with simple locking mechanism. The benchmarks were run on an Apple M1 Pro 8-core CPU with 32 GB of RAM running macOS Ventura 13.1 using Go 1.20.3.
+
+### Reads
+
+```bash
+go version
+go version go1.20.3 darwin/arm64
+go test -benchmem -bench "Get_|Get$"
+goos: darwin
+goarch: arm64
+pkg: github.com/erni27/imcache
+BenchmarkCache_Get-8                                             	 3569514	       429.8 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get/2_Shards-8                                  	 3595566	       412.8 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get/4_Shards-8                                  	 3435393	       408.5 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get/8_Shards-8                                  	 3601080	       414.5 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get/16_Shards-8                                 	 3626385	       398.2 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get/32_Shards-8                                 	 3587340	       408.7 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get/64_Shards-8                                 	 3617484	       400.2 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get/128_Shards-8                                	 3606388	       404.1 ns/op	      23 B/op	       1 allocs/op
+BenchmarkCache_Get_MaxEntriesLimit-8                             	 2587023	       518.0 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit/2_Shards-8                  	 2506747	       525.7 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit/4_Shards-8                  	 2459122	       531.7 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit/8_Shards-8                  	 2349974	       528.2 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit/16_Shards-8                 	 2454192	       536.0 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit/32_Shards-8                 	 2363572	       535.2 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit/64_Shards-8                 	 2399238	       535.7 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit/128_Shards-8                	 2287570	       533.8 ns/op	      23 B/op	       1 allocs/op
+BenchmarkMap_Get-8                                               	 4760186	       333.2 ns/op	      23 B/op	       1 allocs/op
+BenchmarkCache_Get_Parallel-8                                    	 2670980	       498.0 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_Parallel/2_Shards-8                         	 3999897	       326.0 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_Parallel/4_Shards-8                         	 2844760	       434.0 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_Parallel/8_Shards-8                         	 2945050	       431.2 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_Parallel/16_Shards-8                        	 2936168	       428.3 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_Parallel/32_Shards-8                        	 2960804	       431.8 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_Parallel/64_Shards-8                        	 2910768	       428.3 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_Parallel/128_Shards-8                       	 2946024	       429.2 ns/op	      23 B/op	       1 allocs/op
+BenchmarkCache_Get_MaxEntriesLimit_Parallel-8                    	 1980928	       633.6 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_Parallel/2_Shards-8         	 2657145	       490.6 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_Parallel/4_Shards-8         	 2472285	       516.7 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_Parallel/8_Shards-8         	 2453889	       485.1 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_Parallel/16_Shards-8        	 2566749	       492.8 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_Parallel/32_Shards-8        	 2542867	       471.6 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_Parallel/64_Shards-8        	 2599514	       486.5 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_Parallel/128_Shards-8       	 2509952	       470.6 ns/op	      23 B/op	       1 allocs/op
+BenchmarkMap_Get_Parallel-8                                      	 3271418	       447.2 ns/op	      23 B/op	       1 allocs/op
+PASS
+ok  	github.com/erni27/imcache	133.111s
+```
+
+The results are rather predictable. If data is accessed by a single goroutine, the vanilla Go map with simple locking mechanism is the fastest. `Sharded` is the fastest when data is accessed by multiple goroutines. Both `Cache` and `Sharded` are slightly slower when max entries limit is set (last used entries go to the front of the LRU queue).
+
+### Writes
+
+```bash
+go version
+go version go1.20.3 darwin/arm64
+go test -benchmem -bench "_Set"
+goos: darwin
+goarch: arm64
+pkg: github.com/erni27/imcache
+BenchmarkCache_Set-8                                             	 3612012	       417.0 ns/op	     188 B/op	       3 allocs/op
+BenchmarkSharded_Set/2_Shards-8                                  	 3257109	       456.1 ns/op	     202 B/op	       3 allocs/op
+BenchmarkSharded_Set/4_Shards-8                                  	 3197056	       457.8 ns/op	     205 B/op	       3 allocs/op
+BenchmarkSharded_Set/8_Shards-8                                  	 3229351	       459.8 ns/op	     203 B/op	       3 allocs/op
+BenchmarkSharded_Set/16_Shards-8                                 	 3210788	       464.8 ns/op	     204 B/op	       3 allocs/op
+BenchmarkSharded_Set/32_Shards-8                                 	 3144094	       468.0 ns/op	     207 B/op	       3 allocs/op
+BenchmarkSharded_Set/64_Shards-8                                 	 3139846	       468.4 ns/op	     208 B/op	       3 allocs/op
+BenchmarkSharded_Set/128_Shards-8                                	 3078704	       476.0 ns/op	     211 B/op	       3 allocs/op
+BenchmarkCache_Set_MaxEntriesLimit-8                             	 2845030	       469.1 ns/op	     176 B/op	       4 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit/2_Shards-8                  	 2561269	       517.0 ns/op	     183 B/op	       4 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit/4_Shards-8                  	 2495008	       527.5 ns/op	     185 B/op	       4 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit/8_Shards-8                  	 2446089	       533.3 ns/op	     187 B/op	       4 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit/16_Shards-8                 	 2399400	       542.0 ns/op	     188 B/op	       4 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit/32_Shards-8                 	 2358630	       541.0 ns/op	     190 B/op	       4 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit/64_Shards-8                 	 2346480	       551.0 ns/op	     190 B/op	       4 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit/128_Shards-8                	 2277868	       554.1 ns/op	     193 B/op	       4 allocs/op
+BenchmarkMap_Set-8                                               	 5529367	       342.1 ns/op	     113 B/op	       2 allocs/op
+BenchmarkCache_Set_Parallel-8                                    	 2852869	       523.2 ns/op	     223 B/op	       3 allocs/op
+BenchmarkSharded_Set_Parallel/2_Shards-8                         	 2758494	       472.4 ns/op	     229 B/op	       3 allocs/op
+BenchmarkSharded_Set_Parallel/4_Shards-8                         	 2703622	       494.1 ns/op	     232 B/op	       3 allocs/op
+BenchmarkSharded_Set_Parallel/8_Shards-8                         	 2742208	       480.2 ns/op	     230 B/op	       3 allocs/op
+BenchmarkSharded_Set_Parallel/16_Shards-8                        	 2785494	       463.6 ns/op	     227 B/op	       3 allocs/op
+BenchmarkSharded_Set_Parallel/32_Shards-8                        	 2797771	       466.0 ns/op	     226 B/op	       3 allocs/op
+BenchmarkSharded_Set_Parallel/64_Shards-8                        	 2800551	       460.8 ns/op	     226 B/op	       3 allocs/op
+BenchmarkSharded_Set_Parallel/128_Shards-8                       	 2796956	       462.2 ns/op	     226 B/op	       3 allocs/op
+BenchmarkCache_Set_MaxEntriesLimit_Parallel-8                    	 2172498	       588.4 ns/op	     197 B/op	       4 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_Parallel/2_Shards-8         	 2495745	       498.0 ns/op	     185 B/op	       4 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_Parallel/4_Shards-8         	 2388216	       527.8 ns/op	     189 B/op	       4 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_Parallel/8_Shards-8         	 2466673	       509.2 ns/op	     186 B/op	       4 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_Parallel/16_Shards-8        	 2486941	       501.3 ns/op	     185 B/op	       4 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_Parallel/32_Shards-8        	 2479155	       498.1 ns/op	     186 B/op	       4 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_Parallel/64_Shards-8        	 2478316	       495.2 ns/op	     186 B/op	       4 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_Parallel/128_Shards-8       	 2469722	       493.1 ns/op	     186 B/op	       4 allocs/op
+BenchmarkMap_Set_Parallel-8                                      	 3236552	       434.0 ns/op	     100 B/op	       2 allocs/op
+PASS
+ok  	github.com/erni27/imcache	74.508s
+```
+
+When it comes to writes, the vanilla Go map is the fastest even if accessed by multiple goroutines. The advantage is around 30 ns/op when compared to `Sharded` and around 60 ns/op when compared to `Sharded` with max entries limit set. It is caused by the fact, internally `Cache` does the read before the write to make sure it evicts an entry with a proper reason. Again both `Cache` and `Sharded` are slightly slower when max entries limit is set.

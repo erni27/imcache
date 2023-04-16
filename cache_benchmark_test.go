@@ -3,6 +3,7 @@ package imcache
 import (
 	"fmt"
 	"math/rand"
+	"sync"
 	"testing"
 	"time"
 )
@@ -11,25 +12,101 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
-func BenchmarkGet(b *testing.B) {
-	var c Cache[string, int]
+type token struct {
+	ID int `json:"id"`
+}
+
+func BenchmarkCache_Get(b *testing.B) {
+	var c Cache[string, token]
 	for i := 0; i < b.N; i++ {
-		c.Set(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
+		c.Set(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
 	}
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if v, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); ok {
-			_ = (int)(v)
+			_ = (token)(v)
 		}
 	}
 }
 
-func BenchmarkGet_Parallel(b *testing.B) {
-	var c Cache[string, int]
+func BenchmarkSharded_Get(b *testing.B) {
+	for _, n := range []int{2, 4, 8, 16, 32, 64, 128} {
+		b.Run(fmt.Sprintf("%d_Shards", n), func(b *testing.B) {
+			c := NewSharded[string, token](n, DefaultStringHasher64{})
+			for i := 0; i < b.N; i++ {
+				c.Set(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if v, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); ok {
+					_ = (token)(v)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkCache_Get_MaxEntriesLimit(b *testing.B) {
+	c := New[string, token](WithMaxEntriesOption[string, token](b.N))
 	for i := 0; i < b.N; i++ {
-		c.Set(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
+		c.Set(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if v, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); ok {
+			_ = (token)(v)
+		}
+	}
+}
+
+func BenchmarkSharded_Get_MaxEntriesLimit(b *testing.B) {
+	for _, n := range []int{2, 4, 8, 16, 32, 64, 128} {
+		b.Run(fmt.Sprintf("%d_Shards", n), func(b *testing.B) {
+			c := NewSharded[string, token](n, DefaultStringHasher64{}, WithMaxEntriesOption[string, token](b.N/n))
+			for i := 0; i < b.N; i++ {
+				c.Set(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if v, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); ok {
+					_ = (token)(v)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkMap_Get(b *testing.B) {
+	m := make(map[string]token)
+	var mu sync.Mutex
+	for i := 0; i < b.N; i++ {
+		m[fmt.Sprintf("key-%d", i)] = token{ID: i}
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		mu.Lock()
+		v, ok := m[fmt.Sprintf("key-%d", rand.Intn(b.N))]
+		if ok {
+			_ = (token)(v)
+		}
+		mu.Unlock()
+	}
+}
+
+func BenchmarkCache_Get_Parallel(b *testing.B) {
+	var c Cache[string, token]
+	for i := 0; i < b.N; i++ {
+		c.Set(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
 	}
 
 	b.ReportAllocs()
@@ -37,37 +114,18 @@ func BenchmarkGet_Parallel(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			if v, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); ok {
-				_ = (int)(v)
+				_ = (token)(v)
 			}
 		}
 	})
 }
 
-func BenchmarkGet_Sharded(b *testing.B) {
+func BenchmarkSharded_Get_Parallel(b *testing.B) {
 	for _, n := range []int{2, 4, 8, 16, 32, 64, 128} {
-		b.Run(fmt.Sprintf("%d shards", n), func(b *testing.B) {
-			c := NewSharded[string, int](n, DefaultStringHasher64{})
+		b.Run(fmt.Sprintf("%d_Shards", n), func(b *testing.B) {
+			c := NewSharded[string, token](n, DefaultStringHasher64{})
 			for i := 0; i < b.N; i++ {
-				c.Set(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
-			}
-
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				if v, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); ok {
-					_ = (int)(v)
-				}
-			}
-		})
-	}
-}
-
-func BenchmarkGet_Sharded_Parallel(b *testing.B) {
-	for _, n := range []int{2, 4, 8, 16, 32, 64, 128} {
-		b.Run(fmt.Sprintf("%d shards", n), func(b *testing.B) {
-			c := NewSharded[string, int](n, DefaultStringHasher64{})
-			for i := 0; i < b.N; i++ {
-				c.Set(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
+				c.Set(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
 			}
 
 			b.ReportAllocs()
@@ -75,7 +133,7 @@ func BenchmarkGet_Sharded_Parallel(b *testing.B) {
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
 					if v, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); ok {
-						_ = (int)(v)
+						_ = (token)(v)
 					}
 				}
 			})
@@ -83,25 +141,10 @@ func BenchmarkGet_Sharded_Parallel(b *testing.B) {
 	}
 }
 
-func BenchmarkGet_MaxEntriesLimit(b *testing.B) {
-	c := New(WithMaxEntriesOption[string, int](b.N))
+func BenchmarkCache_Get_MaxEntriesLimit_Parallel(b *testing.B) {
+	c := New[string, token](WithMaxEntriesOption[string, token](b.N))
 	for i := 0; i < b.N; i++ {
-		c.Set(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		if v, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); ok {
-			_ = (int)(v)
-		}
-	}
-}
-
-func BenchmarkGet_MaxEntriesLimit_Parallel(b *testing.B) {
-	c := New(WithMaxEntriesOption[string, int](b.N))
-	for i := 0; i < b.N; i++ {
-		c.Set(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
+		c.Set(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
 	}
 
 	b.ReportAllocs()
@@ -109,150 +152,26 @@ func BenchmarkGet_MaxEntriesLimit_Parallel(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			if v, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); ok {
-				_ = (int)(v)
+				_ = (token)(v)
 			}
 		}
 	})
 }
 
-func BenchmarkSet(b *testing.B) {
-	var c Cache[string, int]
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		c.Set(fmt.Sprintf("key-%d", rand.Intn(b.N)), i, WithNoExpiration())
-	}
-}
-
-func BenchmarkSet_Parallel(b *testing.B) {
-	var c Cache[string, int]
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			i := rand.Intn(b.N)
-			c.Set(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
-		}
-	})
-}
-
-func BenchmarkSet_Sharded(b *testing.B) {
+func BenchmarkSharded_Get_MaxEntriesLimit_Parallel(b *testing.B) {
 	for _, n := range []int{2, 4, 8, 16, 32, 64, 128} {
-		b.Run(fmt.Sprintf("%d shards", n), func(b *testing.B) {
-			c := NewSharded[string, int](n, DefaultStringHasher64{})
-
-			b.ReportAllocs()
-			b.ResetTimer()
+		b.Run(fmt.Sprintf("%d_Shards", n), func(b *testing.B) {
+			c := NewSharded[string, token](n, DefaultStringHasher64{}, WithMaxEntriesOption[string, token](b.N/n))
 			for i := 0; i < b.N; i++ {
-				c.Set(fmt.Sprintf("key-%d", rand.Intn(b.N)), i, WithNoExpiration())
+				c.Set(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
 			}
-		})
-	}
-}
-
-func BenchmarkSet_Sharded_Parallel(b *testing.B) {
-	for _, n := range []int{2, 4, 8, 16, 32, 64, 128} {
-		b.Run(fmt.Sprintf("%d shards", n), func(b *testing.B) {
-			c := NewSharded[string, int](n, DefaultStringHasher64{})
 
 			b.ReportAllocs()
 			b.ResetTimer()
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
-					i := rand.Intn(b.N)
-					c.Set(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
-				}
-			})
-		})
-	}
-}
-
-func BenchmarkSet_MaxEntriesLimit(b *testing.B) {
-	c := New(WithMaxEntriesOption[string, int](b.N / 2))
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		c.Set(fmt.Sprintf("key-%d", rand.Intn(b.N)), i, WithNoExpiration())
-	}
-}
-
-func BenchmarkSet_MaxEntriesLimit_Parallel(b *testing.B) {
-	c := New(WithMaxEntriesOption[string, int](b.N / 2))
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			i := rand.Intn(b.N)
-			c.Set(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
-		}
-	})
-}
-
-func BenchmarkGetOrSet(b *testing.B) {
-	c := New[string, int]()
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		i := rand.Intn(b.N)
-		v, ok := c.GetOrSet(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
-		if ok {
-			_ = (int)(v)
-		}
-	}
-}
-
-func BenchmarkGetOrSet_Parallel(b *testing.B) {
-	c := New[string, int]()
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			i := rand.Intn(b.N)
-			v, ok := c.GetOrSet(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
-			if ok {
-				_ = (int)(v)
-			}
-		}
-	})
-}
-
-func BenchmarkGetOrSet_Sharded(b *testing.B) {
-	for _, n := range []int{2, 4, 8, 16, 32, 64, 128, 256, 512, 1024} {
-		b.Run(fmt.Sprintf("%d shards", n), func(b *testing.B) {
-			c := NewSharded[string, int](n, DefaultStringHasher64{})
-
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				i := rand.Intn(b.N)
-				v, ok := c.GetOrSet(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
-				if ok {
-					_ = (int)(v)
-				}
-			}
-		})
-	}
-}
-
-func BenchmarkGetOrSet_Sharded_Parallel(b *testing.B) {
-	for _, n := range []int{2, 4, 8, 16, 32, 64, 128, 256, 512, 1024} {
-		b.Run(fmt.Sprintf("%d shards", n), func(b *testing.B) {
-			c := NewSharded[string, int](n, DefaultStringHasher64{})
-
-			b.ReportAllocs()
-			b.ResetTimer()
-			b.RunParallel(func(pb *testing.PB) {
-				for pb.Next() {
-					i := rand.Intn(b.N)
-					v, ok := c.GetOrSet(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
-					if ok {
-						_ = (int)(v)
+					if v, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); ok {
+						_ = (token)(v)
 					}
 				}
 			})
@@ -260,26 +179,252 @@ func BenchmarkGetOrSet_Sharded_Parallel(b *testing.B) {
 	}
 }
 
-func BenchmarkReplace(b *testing.B) {
-	c := New[string, int]()
+func BenchmarkMap_Get_Parallel(b *testing.B) {
+	m := make(map[string]token)
+	var mu sync.Mutex
 	for i := 0; i < b.N; i++ {
-		c.Set(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
+		m[fmt.Sprintf("key-%d", i)] = token{ID: i}
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			mu.Lock()
+			v, ok := m[fmt.Sprintf("key-%d", rand.Intn(b.N))]
+			if ok {
+				_ = (token)(v)
+			}
+			mu.Unlock()
+		}
+	})
+}
+
+func BenchmarkCache_Set(b *testing.B) {
+	var c Cache[string, token]
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		c.Set(fmt.Sprintf("key-%d", rand.Intn(b.N)), token{ID: i}, WithNoExpiration())
+	}
+}
+
+func BenchmarkSharded_Set(b *testing.B) {
+	for _, n := range []int{2, 4, 8, 16, 32, 64, 128} {
+		b.Run(fmt.Sprintf("%d_Shards", n), func(b *testing.B) {
+			c := NewSharded[string, token](n, DefaultStringHasher64{})
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				c.Set(fmt.Sprintf("key-%d", rand.Intn(b.N)), token{ID: i}, WithNoExpiration())
+			}
+		})
+	}
+}
+
+func BenchmarkCache_Set_MaxEntriesLimit(b *testing.B) {
+	c := New[string, token](WithMaxEntriesOption[string, token](b.N / 2))
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		c.Set(fmt.Sprintf("key-%d", rand.Intn(b.N)), token{ID: i}, WithNoExpiration())
+	}
+}
+
+func BenchmarkSharded_Set_MaxEntriesLimit(b *testing.B) {
+	for _, n := range []int{2, 4, 8, 16, 32, 64, 128} {
+		b.Run(fmt.Sprintf("%d_Shards", n), func(b *testing.B) {
+			c := NewSharded[string, token](n, DefaultStringHasher64{}, WithMaxEntriesOption[string, token](b.N/n/2))
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				c.Set(fmt.Sprintf("key-%d", rand.Intn(b.N)), token{ID: i}, WithNoExpiration())
+			}
+		})
+	}
+}
+
+func BenchmarkMap_Set(b *testing.B) {
+	m := make(map[string]token)
+	var mu sync.Mutex
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		mu.Lock()
+		m[fmt.Sprintf("key-%d", rand.Intn(b.N))] = token{ID: i}
+		mu.Unlock()
+	}
+}
+
+func BenchmarkCache_Set_Parallel(b *testing.B) {
+	var c Cache[string, token]
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			i := rand.Intn(b.N)
+			c.Set(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
+		}
+	})
+}
+
+func BenchmarkSharded_Set_Parallel(b *testing.B) {
+	for _, n := range []int{2, 4, 8, 16, 32, 64, 128} {
+		b.Run(fmt.Sprintf("%d_Shards", n), func(b *testing.B) {
+			c := NewSharded[string, token](n, DefaultStringHasher64{})
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.RunParallel(func(pb *testing.PB) {
+				for pb.Next() {
+					i := rand.Intn(b.N)
+					c.Set(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
+				}
+			})
+		})
+	}
+}
+
+func BenchmarkCache_Set_MaxEntriesLimit_Parallel(b *testing.B) {
+	c := New[string, token](WithMaxEntriesOption[string, token](b.N / 2))
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			i := rand.Intn(b.N)
+			c.Set(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
+		}
+	})
+}
+
+func BenchmarkSharded_Set_MaxEntriesLimit_Parallel(b *testing.B) {
+	for _, n := range []int{2, 4, 8, 16, 32, 64, 128} {
+		b.Run(fmt.Sprintf("%d_Shards", n), func(b *testing.B) {
+			c := NewSharded[string, token](n, DefaultStringHasher64{}, WithMaxEntriesOption[string, token](b.N/n/2))
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.RunParallel(func(pb *testing.PB) {
+				for pb.Next() {
+					i := rand.Intn(b.N)
+					c.Set(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
+				}
+			})
+		})
+	}
+}
+
+func BenchmarkMap_Set_Parallel(b *testing.B) {
+	m := make(map[string]token)
+	var mu sync.Mutex
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			i := rand.Intn(b.N)
+			mu.Lock()
+			m[fmt.Sprintf("key-%d", i)] = token{ID: i}
+			mu.Unlock()
+		}
+	})
+}
+
+func BenchmarkCache_GetOrSet(b *testing.B) {
+	var c Cache[string, token]
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		i := rand.Intn(b.N)
+		v, ok := c.GetOrSet(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
+		if ok {
+			_ = (token)(v)
+		}
+	}
+}
+
+func BenchmarkSharded_GetOrSet(b *testing.B) {
+	for _, n := range []int{2, 4, 8, 16, 32, 64, 128, 256, 512, 1024} {
+		b.Run(fmt.Sprintf("%d_Shards", n), func(b *testing.B) {
+			c := NewSharded[string, token](n, DefaultStringHasher64{})
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				i := rand.Intn(b.N)
+				v, ok := c.GetOrSet(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
+				if ok {
+					_ = (token)(v)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkCache_GetOrSet_Parallel(b *testing.B) {
+	var c Cache[string, token]
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			i := rand.Intn(b.N)
+			v, ok := c.GetOrSet(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
+			if ok {
+				_ = (token)(v)
+			}
+		}
+	})
+}
+
+func Benchmark_Sharded_GetOrSet_Parallel(b *testing.B) {
+	for _, n := range []int{2, 4, 8, 16, 32, 64, 128, 256, 512, 1024} {
+		b.Run(fmt.Sprintf("%d_Shards", n), func(b *testing.B) {
+			c := NewSharded[string, token](n, DefaultStringHasher64{})
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.RunParallel(func(pb *testing.PB) {
+				for pb.Next() {
+					i := rand.Intn(b.N)
+					v, ok := c.GetOrSet(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
+					if ok {
+						_ = (token)(v)
+					}
+				}
+			})
+		})
+	}
+}
+
+func BenchmarkCache_Replace(b *testing.B) {
+	var c Cache[string, token]
+	for i := 0; i < b.N; i++ {
+		c.Set(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
 	}
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		i := rand.Intn(b.N)
-		if ok := c.Replace(fmt.Sprintf("key-%d", i), i, WithNoExpiration()); !ok {
+		if ok := c.Replace(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration()); !ok {
 			b.Fatalf("Replace(_, _, _) = %t", ok)
 		}
 	}
 }
 
-func BenchmarkRemove(b *testing.B) {
-	c := New[string, int]()
+func BenchmarkCache_Remove(b *testing.B) {
+	var c Cache[string, token]
 	for i := 0; i < b.N; i++ {
-		c.Set(fmt.Sprintf("key-%d", i), i, WithNoExpiration())
+		c.Set(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
 	}
 
 	b.ReportAllocs()
