@@ -14,6 +14,7 @@ type Hasher64[K comparable] interface {
 // It uses the FNV-1a hash function.
 type DefaultStringHasher64 struct{}
 
+// Sum64 returns the 64-bit hash of the input key.
 func (DefaultStringHasher64) Sum64(key string) uint64 {
 	hash := fnv.New64a()
 	_, _ = hash.Write([]byte(key))
