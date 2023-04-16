@@ -137,4 +137,4 @@ A `Sharded` instance can be created by calling the `NewSharded` method. It accep
 c := imcache.NewSharded[string, string](4, imcache.DefaultStringHasher64{})
 ```
 
-All previous examples apply to `Sharded` type as well. Note that `Option`(s) are applied to each shard not to the `Sharded` instance itself.
+All previous examples apply to `Sharded` type as well. Note that `Option`(s) are applied to each shard (`Cache` instance) not to the `Sharded` instance itself.

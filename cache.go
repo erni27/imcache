@@ -482,8 +482,8 @@ func (c *Cache[K, V]) StopCleaner() {
 // no eviction callback.
 //
 // Option(s) can be used to customize the returned Sharded.
-// Note that Option(s) are applied to each shard not to
-// Sharded instance itself.
+// Note that Option(s) are applied to each shard (Cache instance)
+// not to the Sharded instance itself.
 func NewSharded[K comparable, V any](n int, hasher Hasher64[K], opts ...Option[K, V]) *Sharded[K, V] {
 	if n <= 0 {
 		panic("imcache: number of shards must be greater than 0")
