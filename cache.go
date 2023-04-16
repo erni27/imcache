@@ -16,7 +16,8 @@ import (
 // New returns a new Cache instance.
 //
 // By default a returned Cache has no default expiration,
-// no default sliding expiration and no eviction callback.
+// no default sliding expiration, no entry limit
+// and no eviction callback.
 // Option(s) can be used to customize the returned Cache.
 func New[K comparable, V any](opts ...Option[K, V]) *Cache[K, V] {
 	s := &Cache[K, V]{
@@ -33,18 +34,20 @@ func New[K comparable, V any](opts ...Option[K, V]) *Cache[K, V] {
 
 // Cache is a non-sharded in-memory cache.
 //
-// By default it has no default expiration,
-// no default sliding expiration and no eviction callback.
-// It implements the Imcache interface.
+// By default it has no default expiration, no default sliding expiration
+// no entry limit and no eviction callback.
 //
 // The zero value Cache is ready to use.
 //
 // If you want to configure a Cache, use the New function
 // and provide proper Option(s).
 //
-//	c := imcache.New(
+// Example:
+//
+//	c := imcache.New[string, interface{}](
 //		imcache.WithDefaultExpirationOption[string, interface{}](time.Second),
-//		imcache.WithEvictionCallbackOption(LogEvictedEntry),
+//		imcache.WithMaxEntriesOption[string, interface{}](10000),
+//		imcache.WithEvictionCallbackOption[string, interface{}](LogEvictedEntry),
 //	)
 type Cache[K comparable, V any] struct {
 	mu sync.Mutex
@@ -471,8 +474,12 @@ func (c *Cache[K, V]) StopCleaner() {
 // It panics if n is not greater than 0 or hasher is nil.
 //
 // By default a returned Sharded has no default expiration,
-// no default sliding expiration and no eviction callback.
+// no default sliding expiration, no entry limit and
+// no eviction callback.
+//
 // Option(s) can be used to customize the returned Sharded.
+// Note that Option(s) are applied to each shard not to
+// Sharded instance itself.
 func NewSharded[K comparable, V any](n int, hasher Hasher64[K], opts ...Option[K, V]) *Sharded[K, V] {
 	if n <= 0 {
 		panic("imcache: number of shards must be greater than 0")
@@ -498,12 +505,19 @@ func NewSharded[K comparable, V any](n int, hasher Hasher64[K], opts ...Option[K
 //
 // Each shard is a separate Cache instance.
 //
-// By default it has no default expiration,
-// no default sliding expiration and no eviction callback.
-// It implements the Imcache interface.
+// By default it has no default expiration, no default sliding expiration
+// no entry limit and no eviction callback.
 //
 // The zero value Sharded is NOT ready to use.
 // The NewSharded function must be used to create a new Sharded.
+//
+// Example:
+//
+//	c := imcache.NewSharded[string, interface{}](8, imcache.DefaultStringHasher64{},
+//		imcache.WithDefaultExpirationOption[string, interface{}](time.Second),
+//		imcache.WithMaxEntriesOption[string, interface{}](10000),
+//		imcache.WithEvictionCallbackOption[string, interface{}](LogEvictedEntry),
+//	)
 type Sharded[K comparable, V any] struct {
 	shards []*Cache[K, V]
 	hasher Hasher64[K]
