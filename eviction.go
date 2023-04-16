@@ -31,7 +31,7 @@ func (r EvictionReason) String() string {
 	case EvictionReasonReplaced:
 		return "replaced"
 	case EvictionReasonMaxEntriesExceeded:
-		return "size exceeded"
+		return "max entries limit exceeded"
 	default:
 		return "unknown"
 	}
