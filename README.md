@@ -27,7 +27,8 @@ import (
 
 func main() {
 	// Zero value Cache is a valid non-sharded cache
-	// with no expiration, no sliding expiration and no eviction callback.
+	// with no expiration, no sliding expiration,
+	// no entry limit and no eviction callback.
 	var c imcache.Cache[uint32, string]
 	// Set a new value with no expiration time.
 	c.Set(1, "one", imcache.WithNoExpiration())
@@ -53,16 +54,16 @@ c.Set(2, "two", imcache.WithSlidingExpiration(time.Second))
 c.Set(3, "three", imcache.WithExpiration(time.Second))
 ```
 
-If you want to use default expiration time for the given cache instance, you can use the `WithDefaultExpiration` `Expiration` option. By default the default expiration time is set to no expiration. You can set the default expiration time when creating a new `Cache` instance.
+If you want to use default expiration time for the given cache instance, you can use the `WithDefaultExpiration` `Expiration` option. By default the default expiration time is set to no expiration. You can set the default expiration time when creating a new `Cache` or a `Sharded` instance. More on sharding can be found in the [Sharding](#sharding) section.
 
 ```go
 // Create a new non-sharded cache instance with default absolute expiration time equal to 1 second.
-c1 := imcache.New(imcache.WithDefaultExpirationOption[int32, string](time.Second))
+c1 := imcache.New[int32, string](imcache.WithDefaultExpirationOption[int32, string](time.Second))
 // Set a new value with default expiration time (absolute).
 c1.Set(1, "one", imcache.WithDefaultExpiration())
 
 // Create a new non-sharded cache instance with default sliding expiration time equal to 1 second.
-c2 := imcache.New(imcache.WithDefaultSlidingExpirationOption[int32, string](time.Second))
+c2 := imcache.New[int32, string](imcache.WithDefaultSlidingExpirationOption[int32, string](time.Second))
 // Set a new value with default expiration time (sliding).
 c2.Set(1, "one", imcache.WithDefaultExpiration())
 ```
@@ -80,7 +81,7 @@ _ = c.StartCleaner(5 * time.Minute)
 defer c.StopCleaner()
 ```
 
-To be notified when an entry is evicted from the cache, you can use the `EvictionCallback`. It's a function that accepts the key and value of the evicted entry along with the reason why the entry was evicted. `EvictionCallback` can be configured when creating a new `Cache` or `Sharded` instance.
+To be notified when an entry is evicted from the cache, you can use the `EvictionCallback`. It's a function that accepts the key and value of the evicted entry along with the reason why the entry was evicted. `EvictionCallback` can be configured when creating a new `Cache` or a `Sharded` instance.
 
 ```go
 package main
@@ -97,9 +98,9 @@ func LogEvictedEntry(key string, value interface{}, reason imcache.EvictionReaso
 }
 
 func main() {
-	c := imcache.New(
+	c := imcache.New[string, interface{}](
 		imcache.WithDefaultExpirationOption[string, interface{}](time.Second),
-		imcache.WithEvictionCallbackOption(LogEvictedEntry),
+		imcache.WithEvictionCallbackOption[string, interface{}](LogEvictedEntry),
 	)
 	c.Set("foo", "bar", imcache.WithDefaultExpiration())
 
@@ -121,7 +122,7 @@ LRU eviction is implemented using a doubly linked list. The list is ordered by t
 The max entries limit can be configured when creating a new `Cache` instance.
 
 ```go
-c := imcache.New(imcache.WithMaxEntriesOption[uint32, string](1000))
+c := imcache.New[uint32, string](imcache.WithMaxEntriesOption[uint32, string](1000))
 ```
 
 ### Sharding
