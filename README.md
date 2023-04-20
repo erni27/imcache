@@ -8,7 +8,7 @@
 
 `imcache` is a generic in-memory cache Go library.
 
-It supports expiration, sliding expiration, max entries limit, eviction callbacks and sharding. It's safe for concurrent use by multiple goroutines.
+It supports absolute expiration, sliding expiration, max entries limit, eviction callbacks and sharding. It's safe for concurrent use by multiple goroutines.
 
 ```Go
 import "github.com/erni27/imcache"
@@ -43,15 +43,26 @@ func main() {
 
 ### Expiration
 
-`imcache` supports no expiration, absolute expiration and sliding expiration. No expiration simply means that the entry will never expire, absolute expiration means that the entry will expire after a certain time and sliding expiration means that the entry will expire after a certain time if it hasn't been accessed.
+`imcache` supports no expiration, absolute expiration and sliding expiration.
+
+* No expiration means that the entry will never expire.
+* Absolute expiration means that the entry will expire after a certain time.
+* Sliding expiration means that the entry will expire after a certain time if it hasn't been accessed. The expiration time is reset every time the entry is accessed.
 
 ```go
 // Set a new value with no expiration time.
+// The entry will never expire.
 c.Set(1, "one", imcache.WithNoExpiration())
 // Set a new value with a sliding expiration time.
+// If the entry hasn't been accessed in the last 1 second, it will be evicted,
+// otherwise the expiration time will be extended by 1 second from the last access time.
 c.Set(2, "two", imcache.WithSlidingExpiration(time.Second))
-// Set a new value with an absolute expiration time.
+// Set a new value with an absolute expiration time set to 1 second from now.
+// The entry will expire after 1 second.
 c.Set(3, "three", imcache.WithExpiration(time.Second))
+// Set a new value with an absolute expiration time set to a specific date.
+// The entry will expire at the given date.
+c.Set(4, "four", imcache.WithExpirationDate(time.Now().Add(time.Second)))
 ```
 
 If you want to use default expiration time for the given cache instance, you can use the `WithDefaultExpiration` `Expiration` option. By default the default expiration time is set to no expiration. You can set the default expiration time when creating a new `Cache` or a `Sharded` instance. More on sharding can be found in the [Sharding](#sharding) section.
@@ -141,7 +152,7 @@ All previous examples apply to `Sharded` type as well. Note that `Option`(s) are
 
 ## Performance
 
-`imcache` is designed to be simple and efficient. It uses a vanilla Go map to store entries and a simple and efficient implementation of double linked list to maintain LRU order. The latter is used to evict the least recently used entry when the max entries limit is reached hence if the max entries limit is not set, `imcache` doesn't maintain any additional data structures.
+`imcache` is designed to be simple and efficient. It uses a vanilla Go map to store entries and a simple and an efficient implementation of double linked list to maintain LRU order. The latter is used to evict the least recently used entry when the max entries limit is reached hence if the max entries limit is not set, `imcache` doesn't maintain any additional data structures.
 
 `imcache` was compared to the vanilla Go map with simple locking mechanism. The benchmarks were run on an Apple M1 Pro 8-core CPU with 32 GB of RAM running macOS Ventura 13.1 using Go 1.20.3.
 

@@ -40,6 +40,10 @@ func WithExpirationDate(t time.Time) Expiration {
 
 // WithSlidingExpiration returns an Expiration that sets the expiration time to
 // now + d and sets the sliding expiration to d.
+//
+// The sliding expiration is the time after which the entry is considered
+// expired if it has not been accessed. If the entry has been accessed,
+// the expiration time is reset to now + d where now is the time of the access.
 func WithSlidingExpiration(d time.Duration) Expiration {
 	return expirationf(func(e *expiration) {
 		e.date = time.Now().Add(d).UnixNano()
