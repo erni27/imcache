@@ -152,7 +152,7 @@ All previous examples apply to `Sharded` type as well. Note that `Option`(s) are
 
 ## Performance
 
-`imcache` is designed to be simple and efficient. It uses a vanilla Go map to store entries and a simple and an efficient implementation of double linked list to maintain LRU order. The latter is used to evict the least recently used entry when the max entries limit is reached hence if the max entries limit is not set, `imcache` doesn't maintain any additional data structures.
+`imcache` is designed to be simple and efficient. It uses a vanilla Go map to store entries and a simple and efficient implementation of double linked list to maintain LRU order. The latter is used to evict the least recently used entry when the max entries limit is reached hence if the max entries limit is not set, `imcache` doesn't maintain any additional data structures.
 
 `imcache` was compared to the vanilla Go map with simple locking mechanism. The benchmarks were run on an Apple M1 Pro 8-core CPU with 32 GB of RAM running macOS Ventura 13.1 using Go 1.20.3.
 
