@@ -29,9 +29,9 @@ func (e *entry[K, V]) HasSlidingExpiration() bool {
 	return e.exp.sliding > 0
 }
 
-// SetDefault sets the expiration time if the entry has a default expiration,
+// SetDefaultOrNothing sets the expiration time if the entry has a default expiration,
 // otherwise it does nothing.
-func (e *entry[K, V]) SetDefault(now time.Time, d time.Duration, sliding bool) {
+func (e *entry[K, V]) SetDefaultOrNothing(now time.Time, d time.Duration, sliding bool) {
 	if e.HasDefaultExpiration() {
 		if d == noExp {
 			e.exp.date = noExp

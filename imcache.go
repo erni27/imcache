@@ -53,7 +53,7 @@ type Cache[K comparable, V any] struct {
 	mu sync.Mutex
 	m  map[K]entry[K, V]
 
-	queue queue[K]
+	queue evictionq[K]
 	size  int
 
 	defaultExp time.Duration
@@ -115,7 +115,7 @@ func (c *Cache[K, V]) Set(key K, val V, exp Expiration) {
 	now := time.Now()
 	new := entry[K, V]{val: val}
 	exp.apply(&new.exp)
-	new.SetDefault(now, c.defaultExp, c.sliding)
+	new.SetDefaultOrNothing(now, c.defaultExp, c.sliding)
 	c.mu.Lock()
 	// Make sure that the shard is initialized.
 	c.init()
@@ -163,7 +163,7 @@ func (c *Cache[K, V]) GetOrSet(key K, val V, exp Expiration) (V, bool) {
 	now := time.Now()
 	new := entry[K, V]{val: val}
 	exp.apply(&new.exp)
-	new.SetDefault(now, c.defaultExp, c.sliding)
+	new.SetDefaultOrNothing(now, c.defaultExp, c.sliding)
 	c.mu.Lock()
 	// Make sure that the shard is initialized.
 	c.init()
@@ -221,7 +221,7 @@ func (c *Cache[K, V]) Replace(key K, val V, exp Expiration) bool {
 	now := time.Now()
 	new := entry[K, V]{val: val}
 	exp.apply(&new.exp)
-	new.SetDefault(now, c.defaultExp, c.sliding)
+	new.SetDefaultOrNothing(now, c.defaultExp, c.sliding)
 	c.mu.Lock()
 	current, ok := c.m[key]
 	if !ok {
@@ -284,7 +284,7 @@ func (c *Cache[K, V]) ReplaceWithFunc(key K, f func(V) V, exp Expiration) bool {
 	}
 	new := entry[K, V]{val: f(current.val), node: current.node}
 	exp.apply(&new.exp)
-	new.SetDefault(now, c.defaultExp, c.sliding)
+	new.SetDefaultOrNothing(now, c.defaultExp, c.sliding)
 	c.queue.Add(new.node)
 	c.m[key] = new
 	c.mu.Unlock()
@@ -329,7 +329,7 @@ func (c *Cache[K, V]) removeAll(now time.Time) {
 	removed := c.m
 	c.m = make(map[K]entry[K, V])
 	if c.size > 0 {
-		c.queue = &fifoq[K]{}
+		c.queue = &lruq[K]{}
 	} else {
 		c.queue = &nopq[K]{}
 	}
