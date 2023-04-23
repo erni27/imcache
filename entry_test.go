@@ -178,7 +178,7 @@ func TestEntry_SetDefault(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.entry.SetDefault(tt.now, tt.d, tt.sliding)
+			tt.entry.SetDefaultOrNothing(tt.now, tt.d, tt.sliding)
 			if tt.entry.exp.date != tt.want.exp.date || tt.entry.exp.sliding != tt.want.exp.sliding || tt.entry.val != tt.want.val {
 				t.Errorf("entry.SetDefault() result %v, want %v", tt.entry, tt.want)
 			}

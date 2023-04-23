@@ -57,6 +57,6 @@ func WithMaxEntriesOption[K comparable, V any](n int) Option[K, V] {
 			return
 		}
 		c.size = n
-		c.queue = &fifoq[K]{}
+		c.queue = &lruq[K]{}
 	})
 }
