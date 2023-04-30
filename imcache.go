@@ -64,6 +64,7 @@ func newCache[K comparable, V any](opts options[K, V]) *Cache[K, V] {
 //
 //	c := imcache.New[string, interface{}](
 //		imcache.WithDefaultExpirationOption[string, interface{}](time.Second),
+//		imcache.WithCleanerOption[string, interface{}](5*time.Minute),
 //		imcache.WithMaxEntriesOption[string, interface{}](10000),
 //		imcache.WithEvictionCallbackOption[string, interface{}](LogEvictedEntry),
 //	)
@@ -601,6 +602,7 @@ func NewSharded[K comparable, V any](n int, hasher Hasher64[K], opts ...Option[K
 //
 //	c := imcache.NewSharded[string, interface{}](8, imcache.DefaultStringHasher64{},
 //		imcache.WithDefaultExpirationOption[string, interface{}](time.Second),
+//		imcache.WithCleanerOption[string, interface{}](5*time.Minute),
 //		imcache.WithMaxEntriesOption[string, interface{}](10000),
 //		imcache.WithEvictionCallbackOption[string, interface{}](LogEvictedEntry),
 //	)
