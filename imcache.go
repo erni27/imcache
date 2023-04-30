@@ -559,7 +559,7 @@ func NewSharded[K comparable, V any](n int, hasher Hasher64[K], opts ...Option[K
 		opt.apply(&o)
 	}
 	cleanerInterval := o.cleanerInterval
-	// To prevent a cleaner from starting for each shard.
+	// To prevent running the cleaner in each shard.
 	o.cleanerInterval = 0
 	shards := make([]*Cache[K, V], n)
 	for i := 0; i < n; i++ {

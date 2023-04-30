@@ -86,9 +86,9 @@ c2.Set(1, "one", imcache.WithDefaultExpiration())
 It is possible to use the `Cleaner` to periodically remove expired entries from the cache. The `Cleaner` is a background goroutine that periodically removes expired entries from the cache. The `Cleaner` is disabled by default. You can enable it when creating a new `Cache` or `Sharded` instance. `Cleaner` is stopped when the cache is closed.
 
 ```go
-// Create a new Cache with the Cleaner which will remove expired entries every 5 minutes.
+// Create a new Cache with a Cleaner which will remove expired entries every 5 minutes.
 c := imcache.New[string, string](imcache.WithCleanerOption[string, string](5 * time.Minute))
-// Close closes the Cache and stops the Cleaner.
+// Close the Cache. This will stop the Cleaner if it is running.
 defer c.Close()
 ```
 

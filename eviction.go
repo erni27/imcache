@@ -113,4 +113,7 @@ func (*nopq[K]) Add(*node[K]) {}
 
 func (*nopq[K]) Remove(*node[K]) {}
 
-func (*nopq[K]) Pop() *node[K] { return nil }
+func (*nopq[K]) Pop() *node[K] {
+	// imcache is carefully designed to never call Pop on a NOP queue.
+	panic("imcache: Pop called on a NOP queue")
+}

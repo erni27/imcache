@@ -1512,7 +1512,7 @@ func TestCache_MaxEntries(t *testing.T) {
 	c.Set("fourteen", 14, WithNoExpiration())
 	c.Set("fifteen", 15, WithNoExpiration())
 	c.Set("sixteen", 16, WithExpiration(time.Nanosecond))
-	c.Set("seventeen", 17, WithNoExpiration())
+	c.Set("seventeen", 17, WithExpiration(100*time.Millisecond))
 	c.Set("eighteen", 18, WithNoExpiration())
 	// LRU queue: eighteen -> seventeen -> sixteen -> fifteen -> fourteen.
 	if _, ok := c.Get("fourteen"); !ok {
@@ -1537,7 +1537,7 @@ func TestCache_MaxEntries(t *testing.T) {
 		t.Error("Cache.Get(_) = _, false, want _, true")
 	}
 	// LRU queue: seventeen -> twenty -> fourteen -> eighteen.
-	c.Set("twentyone", 21, WithNoExpiration())
+	c.Set("twentyone", 21, WithExpiration(200*time.Millisecond))
 	// LRU queue: twentyone -> seventeen -> twenty -> fourteen -> eighteen.
 	if _, ok := c.Get("eighteen"); !ok {
 		t.Error("Cache.Get(_) = _, false, got _, true")
@@ -1561,10 +1561,46 @@ func TestCache_MaxEntries(t *testing.T) {
 		t.Error("Cache.GetOrSet(_, _, _) = _, false, want _, true")
 	}
 	// LRU queue: twenty -> twentytwo -> eighteen -> twentyone -> seventeen.
+	// Wait until seventeen is expired.
+	<-time.After(100 * time.Millisecond)
+	// seventeen is expired, but it's still in the cache.
 	c.Set("twentythree", 23, WithNoExpiration())
 	// LRU queue: twentythree -> twenty -> twentytwo -> eighteen -> twentyone.
 	if _, ok := c.Get("seventeen"); ok {
 		t.Error("Cache.Get(_) = _, true, got _, false")
+	}
+	// seventeen should be evicted with an expired reason instead of max entries exceeded.
+	if !evictioncMock.HasBeenCalledWith("seventeen", 17, EvictionReasonExpired) {
+		t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "seventeen", 17, EvictionReasonExpired)
+	}
+	// Wait until twentyone is expired.
+	<-time.After(100 * time.Millisecond)
+	// twentyone is expired, but it's still in the cache.
+	if _, ok := c.GetOrSet("twentyfour", 24, WithNoExpiration()); ok {
+		t.Error("Cache.GetOrSet(_, _, _) = _, true, want _, false")
+	}
+	// LRU queue: twentyfour -> twentythree -> twenty -> twentytwo -> eighteen.
+	if _, ok := c.Get("twentyone"); ok {
+		t.Error("Cache.Get(_) = _, true, got _, false")
+	}
+	// twentyone should be evicted with an expired reason instead of max entries exceeded.
+	if !evictioncMock.HasBeenCalledWith("twentyone", 21, EvictionReasonExpired) {
+		t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "twentyone", 21, EvictionReasonExpired)
+	}
+}
+
+func TestCache_MaxEntries_NoEvictionCallback(t *testing.T) {
+	c := New(WithMaxEntriesOption[string, int](1))
+	c.Set("one", 1, WithNoExpiration())
+	c.Set("two", 2, WithNoExpiration())
+	if _, ok := c.Get("one"); ok {
+		t.Error("Cache.Get(_) = _, true, want _, false")
+	}
+	if _, ok := c.GetOrSet("three", 3, WithNoExpiration()); ok {
+		t.Error("Cache.GetOrSet(_, _, _) = _, true, want _, false")
+	}
+	if _, ok := c.Get("two"); ok {
+		t.Error("Cache.Get(_) = _, true, want _, false")
 	}
 }
 
