@@ -70,15 +70,18 @@ func WithMaxEntriesOption[K comparable, V any](n int) Option[K, V] {
 }
 
 // WithCleanerOption returns an Option that sets a cache cleaner that
-// periodically removes expired entries from the cache. A cleaner
-// runs in a separate goroutine.
+// periodically removes expired entries from the cache.
+//
+// A cleaner runs in a separate goroutine. It removes expired entries
+// every interval. If the interval is less than or equal to zero,
+// the cleaner is disabled.
 //
 // A cleaner is stopped when the cache is closed.
-func WithCleanerOption[K comparable, V any](d time.Duration) Option[K, V] {
+func WithCleanerOption[K comparable, V any](interval time.Duration) Option[K, V] {
 	return optionf[K, V](func(o *options[K, V]) {
-		if d <= 0 {
+		if interval <= 0 {
 			return
 		}
-		o.cleanerInterval = d
+		o.cleanerInterval = interval
 	})
 }
