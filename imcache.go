@@ -520,6 +520,11 @@ func (c *Cache[K, V]) len() int {
 // Close closes the cache. It purges all entries and stops the cleaner
 // if it is running. After Close, all other methods are NOP returning
 // zero values immediately.
+//
+// It is safe to call Close multiple times.
+//
+// It's not necessary to call Close if the cache is no longer referenced
+// and there is no cleaner running. Garbage collector will collect the cache.
 func (c *Cache[K, V]) Close() {
 	c.mu.Lock()
 	if c.closed {
@@ -747,6 +752,11 @@ func (s *Sharded[K, V]) Len() int {
 // Close closes the cache. It purges all entries and stops the cleaner
 // if it is running. After Close, all other methods are NOP returning
 // zero values immediately.
+//
+// It is safe to call Close multiple times.
+//
+// It's not necessary to call Close if the cache is no longer referenced
+// and there is no cleaner running. Garbage collector will collect the cache.
 func (s *Sharded[K, V]) Close() {
 	for _, shard := range s.shards {
 		shard.Close()
