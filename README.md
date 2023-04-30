@@ -47,25 +47,25 @@ func main() {
 
 * No expiration means that the entry will never expire.
 * Absolute expiration means that the entry will expire after a certain time.
-* Sliding expiration means that the entry will expire after a certain time if it hasn't been accessed. The expiration time is reset every time the entry is accessed.
+* Sliding expiration means that the entry will expire after a certain time if it hasn't been accessed. The expiration time is reset every time the entry is accessed. In other words the expiration time is slided to now + sliding expiration time where now is the time when the entry was accessed (read or write).
 
 ```go
 // Set a new value with no expiration time.
 // The entry will never expire.
 c.Set(1, "one", imcache.WithNoExpiration())
+// Set a new value with an absolute expiration time set to 1 second from now.
+// The entry will expire after 1 second.
+c.Set(2, "two", imcache.WithExpiration(time.Second))
+// Set a new value with an absolute expiration time set to a specific date.
+// The entry will expire at the given date.
+c.Set(3, "three", imcache.WithExpirationDate(time.Now().Add(time.Second)))
 // Set a new value with a sliding expiration time.
 // If the entry hasn't been accessed in the last 1 second, it will be evicted,
 // otherwise the expiration time will be extended by 1 second from the last access time.
-c.Set(2, "two", imcache.WithSlidingExpiration(time.Second))
-// Set a new value with an absolute expiration time set to 1 second from now.
-// The entry will expire after 1 second.
-c.Set(3, "three", imcache.WithExpiration(time.Second))
-// Set a new value with an absolute expiration time set to a specific date.
-// The entry will expire at the given date.
-c.Set(4, "four", imcache.WithExpirationDate(time.Now().Add(time.Second)))
+c.Set(4, "four", imcache.WithSlidingExpiration(time.Second))
 ```
 
-If you want to use default expiration time for the given cache instance, you can use the `WithDefaultExpiration` `Expiration` option. By default the default expiration time is set to no expiration. You can set the default expiration time when creating a new `Cache` or a `Sharded` instance. More on sharding can be found in the [Sharding](#sharding) section.
+If you want to use default expiration time for the given cache instance, you can use the `WithDefaultExpiration` `Expiration` option. By default the default expiration time is set to no expiration. You can set the default expiration time when creating a new `Cache` or `Sharded` instance. More on sharding can be found in the [Sharding](#sharding) section.
 
 ```go
 // Create a new non-sharded cache instance with default absolute expiration time equal to 1 second.
@@ -92,7 +92,7 @@ _ = c.StartCleaner(5 * time.Minute)
 defer c.StopCleaner()
 ```
 
-To be notified when an entry is evicted from the cache, you can use the `EvictionCallback`. It's a function that accepts the key and value of the evicted entry along with the reason why the entry was evicted. `EvictionCallback` can be configured when creating a new `Cache` or a `Sharded` instance.
+To be notified when an entry is evicted from the cache, you can use the `EvictionCallback`. It's a function that accepts the key and value of the evicted entry along with the reason why the entry was evicted. `EvictionCallback` can be configured when creating a new `Cache` or `Sharded` instance.
 
 ```go
 package main
@@ -126,15 +126,15 @@ func main() {
 
 ### Max entries limit
 
-`imcache` supports max entries limit. If the max entries limit is set, the cache evicts the least recently used entry when the max entries limit is reached. The least recently used entry is evicted regardless of the entry's expiration time. This allows `imcache` to remain simple and efficient.
+`imcache` supports max entries limit. It uses simple LRU eviction policy. If the max entries limit is set, the cache evicts the least recently used entry when the max entries limit is reached. The least recently used entry is evicted regardless of the entry's expiration time. This allows `imcache` to remain simple and efficient.
 
-LRU eviction is implemented using a doubly linked list. The list is ordered by the time of the last access to the entry. The most recently used entry is always at the head of the list. The least recently used entry is always at the tail of the list. It means that if the max entries limit is set, `Cache` maintains another data structure in addition to the map of entries. As a result, it increases memory usage and slightly decreases performance.
-
-The max entries limit can be configured when creating a new `Cache` instance.
+The max entries limit can be configured when creating a new `Cache` or `Sharded` instance.
 
 ```go
 c := imcache.New[uint32, string](imcache.WithMaxEntriesOption[uint32, string](1000))
 ```
+
+Note that for the `Sharded` type the max entries limit is applied to each shard separately.
 
 ### Sharding
 

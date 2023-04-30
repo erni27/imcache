@@ -455,7 +455,6 @@ func TestImcache_ReplaceWithFunc(t *testing.T) {
 		c       func() imcache[string, int32]
 		key     string
 		f       func(int32) int32
-		want    bool
 		val     int32
 		present bool
 	}{
@@ -468,7 +467,6 @@ func TestImcache_ReplaceWithFunc(t *testing.T) {
 			},
 			key:     "foo",
 			f:       Increment[int32],
-			want:    true,
 			val:     998,
 			present: true,
 		},
@@ -501,7 +499,6 @@ func TestImcache_ReplaceWithFunc(t *testing.T) {
 			},
 			key:     "foo",
 			f:       Decrement[int32],
-			want:    true,
 			val:     996,
 			present: true,
 		},

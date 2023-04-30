@@ -2,7 +2,7 @@ package imcache
 
 import "time"
 
-// Option is a Cache option.
+// Option configures the cache.
 type Option[K comparable, V any] interface {
 	apply(*Cache[K, V])
 }
@@ -14,7 +14,7 @@ func (f optionf[K, V]) apply(c *Cache[K, V]) {
 	f(c)
 }
 
-// WithEvictionCallbackOption returns an Option that sets the Cache
+// WithEvictionCallbackOption returns an Option that sets the cache
 // eviction callback.
 func WithEvictionCallbackOption[K comparable, V any](f EvictionCallback[K, V]) Option[K, V] {
 	return optionf[K, V](func(c *Cache[K, V]) {
@@ -22,7 +22,7 @@ func WithEvictionCallbackOption[K comparable, V any](f EvictionCallback[K, V]) O
 	})
 }
 
-// WithDefaultExpirationOption returns an Option that sets the Cache
+// WithDefaultExpirationOption returns an Option that sets the cache
 // default expiration.
 func WithDefaultExpirationOption[K comparable, V any](d time.Duration) Option[K, V] {
 	return optionf[K, V](func(c *Cache[K, V]) {
@@ -33,7 +33,7 @@ func WithDefaultExpirationOption[K comparable, V any](d time.Duration) Option[K,
 	})
 }
 
-// WithDefaultSlidingExpirationOption returns an Option that sets the Cache
+// WithDefaultSlidingExpirationOption returns an Option that sets the cache
 // default sliding expiration.
 func WithDefaultSlidingExpirationOption[K comparable, V any](d time.Duration) Option[K, V] {
 	return optionf[K, V](func(c *Cache[K, V]) {
@@ -45,7 +45,7 @@ func WithDefaultSlidingExpirationOption[K comparable, V any](d time.Duration) Op
 	})
 }
 
-// WithMaxEntriesOption returns an Option that sets the Cache maximum number
+// WithMaxEntriesOption returns an Option that sets the cache maximum number
 // of entries. When the maximum number of entries is exceeded, the least
 // recently used entry is evicted regardless of the entry's expiration time.
 //
