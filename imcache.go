@@ -20,14 +20,32 @@ import (
 //
 // Option(s) can be used to customize the returned Cache.
 func New[K comparable, V any](opts ...Option[K, V]) *Cache[K, V] {
+	o := options[K, V]{defaultExp: noExp}
+	for _, opt := range opts {
+		opt.apply(&o)
+	}
+	return newCache(o)
+}
+
+func newCache[K comparable, V any](opts options[K, V]) *Cache[K, V] {
 	c := &Cache[K, V]{
 		m:          make(map[K]entry[K, V]),
-		defaultExp: -1,
-		cleaner:    newCleaner(),
-		queue:      &nopq[K]{},
+		onEviction: opts.onEviction,
+		defaultExp: opts.defaultExp,
+		sliding:    opts.sliding,
 	}
-	for _, opt := range opts {
-		opt.apply(c)
+	if opts.maxEntriesLimit > 0 {
+		c.queue = &lruq[K]{}
+		c.maxEntriesLimit = opts.maxEntriesLimit
+	} else {
+		c.queue = &nopq[K]{}
+	}
+	if opts.cleanerInterval > 0 {
+		c.cleaner = newCleaner()
+		if err := c.cleaner.start(c, opts.cleanerInterval); err != nil {
+			// With current sanitization this should never happen.
+			panic(err)
+		}
 	}
 	return c
 }
@@ -46,6 +64,7 @@ func New[K comparable, V any](opts ...Option[K, V]) *Cache[K, V] {
 //
 //	c := imcache.New[string, interface{}](
 //		imcache.WithDefaultExpirationOption[string, interface{}](time.Second),
+//		imcache.WithCleanerOption[string, interface{}](5*time.Minute),
 //		imcache.WithMaxEntriesOption[string, interface{}](10000),
 //		imcache.WithEvictionCallbackOption[string, interface{}](LogEvictedEntry),
 //	)
@@ -53,15 +72,17 @@ type Cache[K comparable, V any] struct {
 	mu sync.Mutex
 	m  map[K]entry[K, V]
 
-	queue evictionq[K]
-	size  int
-
 	defaultExp time.Duration
 	sliding    bool
 
 	onEviction EvictionCallback[K, V]
 
+	queue           evictionq[K]
+	maxEntriesLimit int
+
 	cleaner *cleaner
+
+	closed bool
 }
 
 // init initializes the Cache.
@@ -78,12 +99,16 @@ func (s *Cache[K, V]) init() {
 // If it encounters an expired entry, the expired entry is evicted.
 func (c *Cache[K, V]) Get(key K) (V, bool) {
 	now := time.Now()
-	var empty V
+	var zero V
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return zero, false
+	}
 	current, ok := c.m[key]
 	if !ok {
 		c.mu.Unlock()
-		return empty, false
+		return zero, false
 	}
 	c.queue.Remove(current.node)
 	if current.HasExpired(now) {
@@ -92,7 +117,7 @@ func (c *Cache[K, V]) Get(key K) (V, bool) {
 		if c.onEviction != nil {
 			c.onEviction(key, current.val, EvictionReasonExpired)
 		}
-		return empty, false
+		return zero, false
 	}
 	if current.HasSlidingExpiration() {
 		current.SlideExpiration(now)
@@ -117,6 +142,10 @@ func (c *Cache[K, V]) Set(key K, val V, exp Expiration) {
 	exp.apply(&new.exp)
 	new.SetDefaultOrNothing(now, c.defaultExp, c.sliding)
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
 	// Make sure that the shard is initialized.
 	c.init()
 	new.node = c.queue.AddNew(key)
@@ -134,7 +163,7 @@ func (c *Cache[K, V]) Set(key K, val V, exp Expiration) {
 		}
 		return
 	}
-	if c.size <= 0 || c.len() <= c.size {
+	if c.maxEntriesLimit <= 0 || c.len() <= c.maxEntriesLimit {
 		c.mu.Unlock()
 		return
 	}
@@ -165,13 +194,18 @@ func (c *Cache[K, V]) GetOrSet(key K, val V, exp Expiration) (V, bool) {
 	exp.apply(&new.exp)
 	new.SetDefaultOrNothing(now, c.defaultExp, c.sliding)
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		var zero V
+		return zero, false
+	}
 	// Make sure that the shard is initialized.
 	c.init()
 	current, ok := c.m[key]
 	if !ok {
 		new.node = c.queue.AddNew(key)
 		c.m[key] = new
-		if c.size <= 0 || c.len() <= c.size {
+		if c.maxEntriesLimit <= 0 || c.len() <= c.maxEntriesLimit {
 			c.mu.Unlock()
 			return val, false
 		}
@@ -223,6 +257,10 @@ func (c *Cache[K, V]) Replace(key K, val V, exp Expiration) bool {
 	exp.apply(&new.exp)
 	new.SetDefaultOrNothing(now, c.defaultExp, c.sliding)
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return false
+	}
 	current, ok := c.m[key]
 	if !ok {
 		c.mu.Unlock()
@@ -268,6 +306,10 @@ func (c *Cache[K, V]) Replace(key K, val V, exp Expiration) bool {
 func (c *Cache[K, V]) ReplaceWithFunc(key K, f func(V) V, exp Expiration) bool {
 	now := time.Now()
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return false
+	}
 	current, ok := c.m[key]
 	if !ok {
 		c.mu.Unlock()
@@ -305,6 +347,10 @@ func (c *Cache[K, V]) ReplaceWithFunc(key K, f func(V) V, exp Expiration) bool {
 func (c *Cache[K, V]) Remove(key K) bool {
 	now := time.Now()
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return false
+	}
 	current, ok := c.m[key]
 	if !ok {
 		c.mu.Unlock()
@@ -324,11 +370,26 @@ func (c *Cache[K, V]) Remove(key K) bool {
 	return true
 }
 
+// RemoveAll removes all entries.
+//
+// If an eviction callback is set, it is called for each removed entry.
+//
+// If it encounters an expired entry, the expired entry is evicted.
+// It results in calling the eviction callback with EvictionReasonExpired,
+// not EvictionReasonRemoved.
+func (c *Cache[K, V]) RemoveAll() {
+	c.removeAll(time.Now())
+}
+
 func (c *Cache[K, V]) removeAll(now time.Time) {
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
 	removed := c.m
 	c.m = make(map[K]entry[K, V])
-	if c.size > 0 {
+	if c.maxEntriesLimit > 0 {
 		c.queue = &lruq[K]{}
 	} else {
 		c.queue = &nopq[K]{}
@@ -345,19 +406,19 @@ func (c *Cache[K, V]) removeAll(now time.Time) {
 	}
 }
 
-// RemoveAll removes all entries.
+// RemoveExpired removes all expired entries.
 //
 // If an eviction callback is set, it is called for each removed entry.
-//
-// If it encounters an expired entry, the expired entry is evicted.
-// It results in calling the eviction callback with EvictionReasonExpired,
-// not EvictionReasonRemoved.
-func (c *Cache[K, V]) RemoveAll() {
-	c.removeAll(time.Now())
+func (c *Cache[K, V]) RemoveExpired() {
+	c.removeExpired(time.Now())
 }
 
 func (c *Cache[K, V]) removeExpired(now time.Time) {
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
 	// To avoid copying the expired entries if there's no eviction callback.
 	if c.onEviction == nil {
 		for key, entry := range c.m {
@@ -382,20 +443,19 @@ func (c *Cache[K, V]) removeExpired(now time.Time) {
 	}
 }
 
-// RemoveExpired removes all expired entries.
+// GetAll returns a copy of all entries in the cache.
 //
-// If an eviction callback is set, it is called for each removed entry.
-func (c *Cache[K, V]) RemoveExpired() {
-	c.removeExpired(time.Now())
-}
-
-type kv[K comparable, V any] struct {
-	key K
-	val V
+// If it encounters an expired entry, the expired entry is evicted.
+func (c *Cache[K, V]) GetAll() map[K]V {
+	return c.getAll(time.Now())
 }
 
 func (c *Cache[K, V]) getAll(now time.Time) map[K]V {
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return nil
+	}
 	// To avoid copying the expired entries if there's no eviction callback.
 	if c.onEviction == nil {
 		m := make(map[K]V, len(c.m))
@@ -435,11 +495,21 @@ func (c *Cache[K, V]) getAll(now time.Time) map[K]V {
 	return m
 }
 
-// GetAll returns a copy of all entries in the cache.
-//
-// If it encounters an expired entry, the expired entry is evicted.
-func (c *Cache[K, V]) GetAll() map[K]V {
-	return c.getAll(time.Now())
+type kv[K comparable, V any] struct {
+	key K
+	val V
+}
+
+// Len returns the number of entries in the cache.
+func (c *Cache[K, V]) Len() int {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return 0
+	}
+	n := c.len()
+	c.mu.Unlock()
+	return n
 }
 
 // len returns the number of entries in the cache.
@@ -448,29 +518,29 @@ func (c *Cache[K, V]) len() int {
 	return len(c.m)
 }
 
-// Len returns the number of entries in the cache.
-func (c *Cache[K, V]) Len() int {
-	c.mu.Lock()
-	n := c.len()
-	c.mu.Unlock()
-	return n
-}
-
-// StartCleaner starts a cleaner that periodically removes expired entries.
-// A cleaner runs in a separate goroutine.
-// It returns an error if the cleaner is already running
-// or if the interval is less than or equal to zero.
+// Close closes the cache. It purges all entries and stops the cleaner
+// if it is running. After Close, all other methods are NOP returning
+// zero values immediately.
 //
-// The cleaner can be stopped by calling StopCleaner method.
-func (c *Cache[K, V]) StartCleaner(interval time.Duration) error {
-	return c.cleaner.start(c, interval)
-}
-
-// StopCleaner stops the cleaner.
-// It is a blocking method that waits for the cleaner to stop.
-// It's a NOP method if the cleaner is not running.
-func (c *Cache[K, V]) StopCleaner() {
-	c.cleaner.stop()
+// It is safe to call Close multiple times.
+//
+// It's not necessary to call Close if the cache is no longer referenced
+// and there is no cleaner running. Garbage collector will collect the cache.
+func (c *Cache[K, V]) Close() {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
+	c.m = nil
+	c.closed = true
+	c.mu.Unlock()
+	// If the cleaner is running, stop it.
+	// It's safe to access c.cleaner without a lock because
+	// it's only set during initialization and never modified.
+	if c.cleaner != nil {
+		c.cleaner.stop()
+	}
 }
 
 // NewSharded returns a new Sharded instance.
@@ -490,16 +560,30 @@ func NewSharded[K comparable, V any](n int, hasher Hasher64[K], opts ...Option[K
 	if hasher == nil {
 		panic("imcache: hasher must be not nil")
 	}
+	o := options[K, V]{defaultExp: noExp}
+	for _, opt := range opts {
+		opt.apply(&o)
+	}
+	cleanerInterval := o.cleanerInterval
+	// To prevent running the cleaner in each shard.
+	o.cleanerInterval = 0
 	shards := make([]*Cache[K, V], n)
 	for i := 0; i < n; i++ {
-		shards[i] = New(opts...)
+		shards[i] = newCache(o)
 	}
-	return &Sharded[K, V]{
-		shards:  shards,
-		hasher:  hasher,
-		mask:    uint64(n - 1),
-		cleaner: newCleaner(),
+	s := &Sharded[K, V]{
+		shards: shards,
+		hasher: hasher,
+		mask:   uint64(n - 1),
 	}
+	if cleanerInterval > 0 {
+		s.cleaner = newCleaner()
+		if err := s.cleaner.start(s, cleanerInterval); err != nil {
+			// With current sanitization this should never happen.
+			panic(err)
+		}
+	}
+	return s
 }
 
 // Sharded is a sharded in-memory cache.
@@ -518,6 +602,7 @@ func NewSharded[K comparable, V any](n int, hasher Hasher64[K], opts ...Option[K
 //
 //	c := imcache.NewSharded[string, interface{}](8, imcache.DefaultStringHasher64{},
 //		imcache.WithDefaultExpirationOption[string, interface{}](time.Second),
+//		imcache.WithCleanerOption[string, interface{}](5*time.Minute),
 //		imcache.WithMaxEntriesOption[string, interface{}](10000),
 //		imcache.WithEvictionCallbackOption[string, interface{}](LogEvictedEntry),
 //	)
@@ -640,6 +725,11 @@ func (s *Sharded[K, V]) GetAll() map[K]V {
 	ms := make([]map[K]V, 0, len(s.shards))
 	for _, shard := range s.shards {
 		m := shard.getAll(now)
+		// If Cache.getAll returns nil, it means that the shard is closed
+		// hence Sharded is closed too.
+		if m == nil {
+			return nil
+		}
 		n += len(m)
 		ms = append(ms, m)
 	}
@@ -661,19 +751,22 @@ func (s *Sharded[K, V]) Len() int {
 	return n
 }
 
-// StartCleaner starts a cleaner that periodically removes expired entries.
-// A cleaner runs in a separate goroutine.
-// It returns an error if the cleaner is already running
-// or if the interval is less than or equal to zero.
+// Close closes the cache. It purges all entries and stops the cleaner
+// if it is running. After Close, all other methods are NOP returning
+// zero values immediately.
 //
-// The cleaner can be stopped by calling StopCleaner method.
-func (s *Sharded[K, V]) StartCleaner(interval time.Duration) error {
-	return s.cleaner.start(s, interval)
-}
-
-// StopCleaner stops the cleaner.
-// It is a blocking method that waits for the cleaner to stop.
-// It's a NOP method if the cleaner is not running.
-func (s *Sharded[K, V]) StopCleaner() {
-	s.cleaner.stop()
+// It is safe to call Close multiple times.
+//
+// It's not necessary to call Close if the cache is no longer referenced
+// and there is no cleaner running. Garbage collector will collect the cache.
+func (s *Sharded[K, V]) Close() {
+	for _, shard := range s.shards {
+		shard.Close()
+	}
+	// If the cleaner is running, stop it.
+	// It's safe to access s.cleaner without a lock because
+	// it's only set during initialization and never modified.
+	if s.cleaner != nil {
+		s.cleaner.stop()
+	}
 }

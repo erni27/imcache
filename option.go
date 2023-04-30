@@ -2,46 +2,55 @@ package imcache
 
 import "time"
 
-// Option configures the cache.
-type Option[K comparable, V any] interface {
-	apply(*Cache[K, V])
+// options holds the cache configuration.
+type options[K comparable, V any] struct {
+	onEviction      EvictionCallback[K, V]
+	defaultExp      time.Duration
+	sliding         bool
+	maxEntriesLimit int
+	cleanerInterval time.Duration
 }
 
-type optionf[K comparable, V any] func(*Cache[K, V])
+// Option configures the cache.
+type Option[K comparable, V any] interface {
+	apply(*options[K, V])
+}
+
+type optionf[K comparable, V any] func(*options[K, V])
 
 //lint:ignore U1000 false positive
-func (f optionf[K, V]) apply(c *Cache[K, V]) {
-	f(c)
+func (f optionf[K, V]) apply(o *options[K, V]) {
+	f(o)
 }
 
 // WithEvictionCallbackOption returns an Option that sets the cache
 // eviction callback.
 func WithEvictionCallbackOption[K comparable, V any](f EvictionCallback[K, V]) Option[K, V] {
-	return optionf[K, V](func(c *Cache[K, V]) {
-		c.onEviction = f
+	return optionf[K, V](func(o *options[K, V]) {
+		o.onEviction = f
 	})
 }
 
 // WithDefaultExpirationOption returns an Option that sets the cache
 // default expiration.
 func WithDefaultExpirationOption[K comparable, V any](d time.Duration) Option[K, V] {
-	return optionf[K, V](func(c *Cache[K, V]) {
+	return optionf[K, V](func(o *options[K, V]) {
 		if d <= 0 {
 			return
 		}
-		c.defaultExp = d
+		o.defaultExp = d
 	})
 }
 
 // WithDefaultSlidingExpirationOption returns an Option that sets the cache
 // default sliding expiration.
 func WithDefaultSlidingExpirationOption[K comparable, V any](d time.Duration) Option[K, V] {
-	return optionf[K, V](func(c *Cache[K, V]) {
+	return optionf[K, V](func(o *options[K, V]) {
 		if d <= 0 {
 			return
 		}
-		c.defaultExp = d
-		c.sliding = true
+		o.defaultExp = d
+		o.sliding = true
 	})
 }
 
@@ -52,11 +61,27 @@ func WithDefaultSlidingExpirationOption[K comparable, V any](d time.Duration) Op
 // If used with Sharded type, the maximum size is per shard,
 // not the total size of all shards.
 func WithMaxEntriesOption[K comparable, V any](n int) Option[K, V] {
-	return optionf[K, V](func(c *Cache[K, V]) {
+	return optionf[K, V](func(o *options[K, V]) {
 		if n <= 0 {
 			return
 		}
-		c.size = n
-		c.queue = &lruq[K]{}
+		o.maxEntriesLimit = n
+	})
+}
+
+// WithCleanerOption returns an Option that sets a cache cleaner that
+// periodically removes expired entries from the cache.
+//
+// A cleaner runs in a separate goroutine. It removes expired entries
+// every interval. If the interval is less than or equal to zero,
+// the cleaner is disabled.
+//
+// A cleaner is stopped when the cache is closed.
+func WithCleanerOption[K comparable, V any](interval time.Duration) Option[K, V] {
+	return optionf[K, V](func(o *options[K, V]) {
+		if interval <= 0 {
+			return
+		}
+		o.cleanerInterval = interval
 	})
 }
