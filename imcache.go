@@ -20,16 +20,16 @@ import (
 //
 // Option(s) can be used to customize the returned Cache.
 func New[K comparable, V any](opts ...Option[K, V]) *Cache[K, V] {
-	s := &Cache[K, V]{
+	c := &Cache[K, V]{
 		m:          make(map[K]entry[K, V]),
 		defaultExp: -1,
 		cleaner:    newCleaner(),
 		queue:      &nopq[K]{},
 	}
 	for _, opt := range opts {
-		opt.apply(s)
+		opt.apply(c)
 	}
-	return s
+	return c
 }
 
 // Cache is a non-sharded in-memory cache.
