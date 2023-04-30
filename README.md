@@ -6,7 +6,7 @@
 [![GoDoc](https://pkg.go.dev/badge/mod/github.com/erni27/imcache)](https://pkg.go.dev/mod/github.com/erni27/imcache)
 [![Coverage Status](https://codecov.io/gh/erni27/imcache/branch/master/graph/badge.svg)](https://codecov.io/gh/erni27/imcache)
 
-`imcache` is a generic in-memory cache Go library.
+`imcache` is a zero-dependency generic in-memory cache Go library.
 
 It supports absolute expiration, sliding expiration, max entries limit, eviction callbacks and sharding. It's safe for concurrent use by multiple goroutines.
 
@@ -83,13 +83,13 @@ c2.Set(1, "one", imcache.WithDefaultExpiration())
 
 `imcache` follows very naive and simple eviction approach. If an expired entry is accessed by any `Cache` method, it is removed from the cache. The exception is the max entries limit. If the max entries limit is set, the cache  evicts the least recently used entry when the max entries limit is reached regardless of its expiration time. More on limiting the max number of entries in the cache can be found in the [Max entries limit](#max-entries-limit) section.
 
-It is possible to use the `Cleaner` to periodically remove expired entries from the cache. The `Cleaner` is a background goroutine that periodically removes expired entries from the cache. The `Cleaner` is disabled by default. You can enable it by calling the `StartCleaner` method. The `Cleaner` can be stopped by calling the `StopCleaner` method.
+It is possible to use the `Cleaner` to periodically remove expired entries from the cache. The `Cleaner` is a background goroutine that periodically removes expired entries from the cache. The `Cleaner` is disabled by default. You can enable it when creating a new `Cache` or `Sharded` instance. `Cleaner` is stopped when the cache is closed.
 
 ```go
-var c imcache.Cache[string, string]
-// Start Cleaner which will remove expired entries every 5 minutes.
-_ = c.StartCleaner(5 * time.Minute)
-defer c.StopCleaner()
+// Create a new Cache with the Cleaner which will remove expired entries every 5 minutes.
+c := imcache.New[string, string](imcache.WithCleanerOption[string, string](5 * time.Minute))
+// Close closes the Cache and stops the Cleaner.
+defer c.Close()
 ```
 
 To be notified when an entry is evicted from the cache, you can use the `EvictionCallback`. It's a function that accepts the key and value of the evicted entry along with the reason why the entry was evicted. `EvictionCallback` can be configured when creating a new `Cache` or `Sharded` instance.

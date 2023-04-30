@@ -24,8 +24,7 @@ type imcache[K comparable, V any] interface {
 	RemoveExpired()
 	GetAll() map[K]V
 	Len() int
-	StartCleaner(interval time.Duration) error
-	StopCleaner()
+	Close()
 }
 
 func TestImcache_Get(t *testing.T) {
@@ -868,6 +867,132 @@ func TestCache_DefaultSlidingExpiration_LessOrEqual0(t *testing.T) {
 	}
 }
 
+func TestImcache_Cleaner(t *testing.T) {
+	evictioncMock := &evictionCallbackMock{}
+
+	tests := []struct {
+		name string
+		c    imcache[string, interface{}]
+	}{
+		{
+			name: "not sharded",
+			c:    New(WithEvictionCallbackOption(evictioncMock.Callback), WithCleanerOption[string, interface{}](20*time.Millisecond)),
+		},
+		{
+			name: "sharded",
+			c:    NewSharded[string](8, DefaultStringHasher64{}, WithEvictionCallbackOption(evictioncMock.Callback), WithCleanerOption[string, interface{}](20*time.Millisecond)),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer evictioncMock.Reset()
+			c := tt.c
+			c.Set("foo", "foo", WithExpiration(time.Millisecond))
+			c.Set("bar", "bar", WithExpiration(time.Millisecond))
+			c.Set("foobar", "foobar", WithExpiration(100*time.Millisecond))
+			<-time.After(30 * time.Millisecond)
+			if !evictioncMock.HasBeenCalledWith("foo", "foo", EvictionReasonExpired) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "foo", "foo", EvictionReasonExpired)
+			}
+			if !evictioncMock.HasBeenCalledWith("bar", "bar", EvictionReasonExpired) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "bar", "bar", EvictionReasonExpired)
+			}
+			if evictioncMock.HasBeenCalledWith("foobar", "foobar", EvictionReasonExpired) {
+				t.Errorf("want EvictionCallback not called with EvictionCallback(%s, %s, %d)", "foobar", "foobar", EvictionReasonExpired)
+			}
+			<-time.After(200 * time.Millisecond)
+			if !evictioncMock.HasBeenCalledWith("foobar", "foobar", EvictionReasonExpired) {
+				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "foobar", "foobar", EvictionReasonExpired)
+			}
+		})
+	}
+}
+
+func TestImcache_Cleaner_IntervalLessOrEqual0(t *testing.T) {
+	evictioncMock := &evictionCallbackMock{}
+
+	tests := []struct {
+		name string
+		c    imcache[string, interface{}]
+	}{
+		{
+			name: "not sharded",
+			c:    New(WithEvictionCallbackOption(evictioncMock.Callback), WithCleanerOption[string, interface{}](-1)),
+		},
+		{
+			name: "sharded",
+			c:    NewSharded[string](8, DefaultStringHasher64{}, WithEvictionCallbackOption(evictioncMock.Callback), WithCleanerOption[string, interface{}](0)),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer evictioncMock.Reset()
+			c := tt.c
+			c.Set("foo", "foo", WithExpiration(time.Millisecond))
+			c.Set("bar", "bar", WithExpiration(time.Millisecond))
+			c.Set("foobar", "foobar", WithExpiration(100*time.Millisecond))
+			<-time.After(200 * time.Millisecond)
+			if !evictioncMock.HasNotBeenCalled() {
+				t.Error("want EvictionCallback not called")
+			}
+		})
+	}
+}
+
+func TestImcache_Close(t *testing.T) {
+	tests := []struct {
+		name string
+		c    imcache[string, string]
+	}{
+		{
+			name: "not sharded",
+			c:    New[string, string](WithCleanerOption[string, string](time.Millisecond)),
+		},
+		{
+			name: "sharded",
+			c:    NewSharded[string, string](8, DefaultStringHasher64{}, WithCleanerOption[string, string](time.Millisecond)),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := tt.c
+			c.Close()
+			c.Set("foo", "foo", WithNoExpiration())
+			if _, ok := c.Get("foo"); ok {
+				t.Error("imcache.Get(_) = _, ok, want _, false")
+			}
+			v, ok := c.GetOrSet("foo", "bar", WithNoExpiration())
+			if ok {
+				t.Error("imcache.GetOrSet(_, _, _) = _, ok, want _, false")
+			}
+			if v != "" {
+				t.Errorf("imcache.GetOrSet(_, _, _) = %s, _, want %s, _", v, "")
+			}
+			if ok := c.Replace("foo", "bar", WithNoExpiration()); ok {
+				t.Error("imcache.Replace(_, _, _) = ok, want false")
+			}
+			if ok := c.ReplaceWithFunc("foo", func(string) string { return "bar" }, WithNoExpiration()); ok {
+				t.Error("imcache.ReplaceWithFunc(_, _, _) = ok, want false")
+			}
+			if ok := c.Remove("foo"); ok {
+				t.Error("imcache.Remove(_) = ok, want false")
+			}
+			if got := c.GetAll(); got != nil {
+				t.Errorf("imcache.GetAll() = %v, want nil", got)
+			}
+			if c.Len() != 0 {
+				t.Errorf("imcache.Len() = %d, want %d", c.Len(), 0)
+			}
+			c.RemoveAll()
+			c.RemoveExpired()
+			c.Close()
+		})
+	}
+}
+
 type evictionCallbackCall struct {
 	key    string
 	val    interface{}
@@ -1257,117 +1382,6 @@ func TestNewSharded_NilHasher(t *testing.T) {
 		}
 	}()
 	_ = NewSharded[string, string](2, nil)
-}
-
-func TestImcache_StartCleaner(t *testing.T) {
-	evictioncMock := &evictionCallbackMock{}
-
-	tests := []struct {
-		name string
-		c    imcache[string, interface{}]
-	}{
-		{
-			name: "not sharded",
-			c:    New(WithEvictionCallbackOption(evictioncMock.Callback)),
-		},
-		{
-			name: "sharded",
-			c:    NewSharded[string](8, DefaultStringHasher64{}, WithEvictionCallbackOption(evictioncMock.Callback)),
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			defer evictioncMock.Reset()
-			c := tt.c
-			c.Set("foo", "foo", WithExpiration(time.Millisecond))
-			c.Set("bar", "bar", WithExpiration(time.Millisecond))
-			c.Set("foobar", "foobar", WithExpiration(100*time.Millisecond))
-			// StartCleaner should return an error if the interval is equal
-			// or less than 0.
-			if err := c.StartCleaner(0); err == nil {
-				t.Fatalf("Cache.StartCleaner(_) = nil, want error")
-			}
-			if err := c.StartCleaner(-10); err == nil {
-				t.Fatalf("Cache.StartCleaner(_) = nil, want error")
-			}
-			// Valid interval should start a cleaner.
-			if err := c.StartCleaner(20 * time.Millisecond); err != nil {
-				t.Fatalf("Cache.StartCleaner(_) = %v, want nil", err)
-			}
-			// Subsequent calls to StartCleaner should not start a new cleaner
-			// and should return an error.
-			if err := c.StartCleaner(5 * time.Nanosecond); err == nil {
-				t.Fatalf("Cache.StartCleaner(_) = nil, want error")
-			}
-			if err := c.StartCleaner(7 * time.Nanosecond); err == nil {
-				t.Fatalf("Cache.StartCleaner(_) = nil, want error")
-			}
-			<-time.After(30 * time.Millisecond)
-			if !evictioncMock.HasBeenCalledWith("foo", "foo", EvictionReasonExpired) {
-				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "foo", "foo", EvictionReasonExpired)
-			}
-			if !evictioncMock.HasBeenCalledWith("bar", "bar", EvictionReasonExpired) {
-				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "bar", "bar", EvictionReasonExpired)
-			}
-			if evictioncMock.HasBeenCalledWith("foobar", "foobar", EvictionReasonExpired) {
-				t.Errorf("want EvictionCallback not called with EvictionCallback(%s, %s, %d)", "foobar", "foobar", EvictionReasonExpired)
-			}
-			<-time.After(200 * time.Millisecond)
-			if !evictioncMock.HasBeenCalledWith("foobar", "foobar", EvictionReasonExpired) {
-				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "foobar", "foobar", EvictionReasonExpired)
-			}
-		})
-	}
-}
-
-func TestImcache_StopCleaner(t *testing.T) {
-	evictioncMock := &evictionCallbackMock{}
-
-	tests := []struct {
-		name string
-		c    imcache[string, interface{}]
-	}{
-		{
-			name: "not sharded",
-			c:    New(WithEvictionCallbackOption(evictioncMock.Callback)),
-		},
-		{
-			name: "sharded",
-			c:    NewSharded[string](8, DefaultStringHasher64{}, WithEvictionCallbackOption(evictioncMock.Callback)),
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			defer evictioncMock.Reset()
-			c := tt.c
-			c.Set("foo", "foo", WithExpiration(time.Millisecond))
-			c.Set("bar", "bar", WithExpiration(time.Millisecond))
-			c.Set("foobar", "foobar", WithExpiration(100*time.Millisecond))
-			if err := c.StartCleaner(20 * time.Millisecond); err != nil {
-				t.Fatalf("Cache.StartCleaner(_) = %v, want nil", err)
-			}
-			<-time.After(30 * time.Millisecond)
-			if !evictioncMock.HasBeenCalledWith("foo", "foo", EvictionReasonExpired) {
-				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "foo", "foo", EvictionReasonExpired)
-			}
-			if !evictioncMock.HasBeenCalledWith("bar", "bar", EvictionReasonExpired) {
-				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "bar", "bar", EvictionReasonExpired)
-			}
-			if evictioncMock.HasBeenCalledWith("foobar", "foobar", EvictionReasonExpired) {
-				t.Errorf("want EvictionCallback not called with EvictionCallback(%s, %s, %d)", "foobar", "foobar", EvictionReasonExpired)
-			}
-			c.StopCleaner()
-			// Subsequent calls to StopCleaner should do nothing.
-			c.StopCleaner()
-			c.StopCleaner()
-			<-time.After(200 * time.Millisecond)
-			if evictioncMock.HasBeenCalledWith("foobar", "foobar", EvictionReasonExpired) {
-				t.Errorf("want EvictionCallback called with EvictionCallback(%s, %s, %d)", "foobar", "foobar", EvictionReasonExpired)
-			}
-		})
-	}
 }
 
 func TestCache_ZeroValue(t *testing.T) {
