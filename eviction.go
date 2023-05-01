@@ -20,6 +20,9 @@ const (
 	// limit. The least recently used entry is evicted regardless of the
 	// entry's expiration time.
 	EvictionReasonMaxEntriesExceeded
+	// EvictionReasonKeyReplaced indicates that the entry was evicted
+	// because the key was replaced.
+	EvictionReasonKeyReplaced
 )
 
 func (r EvictionReason) String() string {
@@ -32,6 +35,8 @@ func (r EvictionReason) String() string {
 		return "replaced"
 	case EvictionReasonMaxEntriesExceeded:
 		return "max entries limit exceeded"
+	case EvictionReasonKeyReplaced:
+		return "key replaced"
 	default:
 		return "unknown"
 	}
