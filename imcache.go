@@ -806,6 +806,7 @@ func (s *Sharded[K, V]) ReplaceKey(old, new K, exp Expiration) bool {
 	delete(newShard.m, lruNode.key)
 	oldShard.mu.Unlock()
 	newShard.mu.Unlock()
+	newShard.onEviction(old, oldShardEntry.val, EvictionReasonKeyReplaced)
 	if lruEntry.HasExpired(now) {
 		newShard.onEviction(lruNode.key, lruEntry.val, EvictionReasonExpired)
 	} else {

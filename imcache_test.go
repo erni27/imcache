@@ -623,6 +623,20 @@ func TestImcache_ReplaceKey(t *testing.T) {
 	}
 }
 
+func TestSharded_ReplaceKey_SameShard(t *testing.T) {
+	s := NewSharded[string, string](2, DefaultStringHasher64{})
+	s.Set("1", "foo", WithNoExpiration())
+	if ok := s.ReplaceKey("1", "3", WithNoExpiration()); !ok {
+		t.Errorf("Cache.ReplaceKey(1, 3, _) = %t, want %t", ok, true)
+	}
+	if _, ok := s.Get("1"); ok {
+		t.Errorf("Cache.Get(1) = _, %t, want _, %t", ok, false)
+	}
+	if got, ok := s.Get("3"); !ok || got != "foo" {
+		t.Errorf("Cache.Get(3) = %v, %t, want %v, %t", got, ok, "foo", true)
+	}
+}
+
 func TestImcache_Remove(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -1536,7 +1550,7 @@ func TestCache_ZeroValue(t *testing.T) {
 	}
 }
 
-func TestCache_MaxEntries(t *testing.T) {
+func TestCache_MaxEntriesLimit(t *testing.T) {
 	evictioncMock := &evictionCallbackMock{}
 
 	c := New(WithEvictionCallbackOption(evictioncMock.Callback), WithMaxEntriesOption[string, interface{}](5))
@@ -1733,7 +1747,74 @@ func TestCache_MaxEntries(t *testing.T) {
 	}
 }
 
-func TestCache_MaxEntries_NoEvictionCallback(t *testing.T) {
+func TestSharded_ReplaceKey_MaxEntriesLimit(t *testing.T) {
+	evictioncMock := &evictionCallbackMock{}
+
+	s := NewSharded[string, interface{}](2, DefaultStringHasher64{},
+		WithMaxEntriesOption[string, interface{}](1),
+		WithEvictionCallbackOption(evictioncMock.Callback),
+	)
+
+	s.Set("key-1", 1, WithNoExpiration())
+	s.Set("key-2", 2, WithNoExpiration())
+	if ok := s.ReplaceKey("key-2", "key-3", WithExpiration(time.Nanosecond)); !ok {
+		t.Error("Cache.ReplaceKey(_, _, _) = false, want true")
+	}
+	// Entry with key-2 should be evicted with a key replaced reason.
+	if _, ok := s.Get("key-2"); ok {
+		t.Error("Cache.Get(_) = _, true, want _, false")
+	}
+	if !evictioncMock.HasBeenCalledWith("key-2", 2, EvictionReasonKeyReplaced) {
+		t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "key-2", 2, EvictionReasonKeyReplaced)
+	}
+	// Entry with key-1 should be evicted with a max entries exceeded reason.
+	if _, ok := s.Get("key-1"); ok {
+		t.Error("Cache.Get(_) = _, true, want _, false")
+	}
+	if !evictioncMock.HasBeenCalledWith("key-1", 1, EvictionReasonMaxEntriesExceeded) {
+		t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "key-1", 1, EvictionReasonMaxEntriesExceeded)
+	}
+	s.Set("key-4", 4, WithNoExpiration())
+	// Wait until key-3 is expired.
+	<-time.After(time.Nanosecond)
+	if ok := s.ReplaceKey("key-4", "key-5", WithNoExpiration()); !ok {
+		t.Error("Cache.ReplaceKey(_, _, _) = false, want true")
+	}
+	// Entry with key-4 should be evicted with a key replaced reason.
+	if _, ok := s.Get("key-4"); ok {
+		t.Error("Cache.Get(_) = _, true, want _, false")
+	}
+	if !evictioncMock.HasBeenCalledWith("key-4", 4, EvictionReasonKeyReplaced) {
+		t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "key-4", 4, EvictionReasonKeyReplaced)
+	}
+	// Entry with key-3 should be evicted with an expired reason.
+	if _, ok := s.Get("key-3"); ok {
+		t.Error("Cache.Get(_) = _, true, want _, false")
+	}
+	if !evictioncMock.HasBeenCalledWith("key-3", 2, EvictionReasonExpired) {
+		t.Errorf("want EvictionCallback called with EvictionCallback(%s, %d, %d)", "key-3", 3, EvictionReasonExpired)
+	}
+}
+
+func TestSharded_ReplaceKey_MaxEntriesLimit_NoEvictionCallback(t *testing.T) {
+	s := NewSharded[string, interface{}](2, DefaultStringHasher64{}, WithMaxEntriesOption[string, interface{}](1))
+
+	s.Set("key-1", 1, WithNoExpiration())
+	s.Set("key-2", 2, WithNoExpiration())
+	if ok := s.ReplaceKey("key-2", "key-3", WithExpiration(time.Nanosecond)); !ok {
+		t.Error("Cache.ReplaceKey(_, _, _) = false, want true")
+	}
+	// Entry with key-2 should be evicted with a key replaced reason.
+	if _, ok := s.Get("key-2"); ok {
+		t.Error("Cache.Get(_) = _, true, want _, false")
+	}
+	// Entry with key-1 should be evicted with a max entries exceeded reason.
+	if _, ok := s.Get("key-1"); ok {
+		t.Error("Cache.Get(_) = _, true, want _, false")
+	}
+}
+
+func TestCache_MaxEntriesLimit_NoEvictionCallback(t *testing.T) {
 	c := New(WithMaxEntriesOption[string, int](1))
 	c.Set("one", 1, WithNoExpiration())
 	c.Set("two", 2, WithNoExpiration())
@@ -1748,7 +1829,7 @@ func TestCache_MaxEntries_NoEvictionCallback(t *testing.T) {
 	}
 }
 
-func TestCache_MaxEntries_LessOrEqual0(t *testing.T) {
+func TestCache_MaxEntriesLimit_LessOrEqual0(t *testing.T) {
 	c := New(WithMaxEntriesOption[string, string](0))
 	if _, ok := c.queue.(*nopq[string]); !ok {
 		t.Error("Cache.queue = _, want *nopq")
