@@ -105,27 +105,27 @@ func (c *Cache[K, V]) Get(key K) (V, bool) {
 		c.mu.Unlock()
 		return zero, false
 	}
-	current, ok := c.m[key]
+	currentEntry, ok := c.m[key]
 	if !ok {
 		c.mu.Unlock()
 		return zero, false
 	}
-	c.queue.Remove(current.node)
-	if current.HasExpired(now) {
+	c.queue.Remove(currentEntry.node)
+	if currentEntry.HasExpired(now) {
 		delete(c.m, key)
 		c.mu.Unlock()
 		if c.onEviction != nil {
-			c.onEviction(key, current.val, EvictionReasonExpired)
+			c.onEviction(key, currentEntry.val, EvictionReasonExpired)
 		}
 		return zero, false
 	}
-	if current.HasSlidingExpiration() {
-		current.SlideExpiration(now)
-		c.m[key] = current
+	if currentEntry.HasSlidingExpiration() {
+		currentEntry.SlideExpiration(now)
+		c.m[key] = currentEntry
 	}
-	c.queue.Add(current.node)
+	c.queue.Add(currentEntry.node)
 	c.mu.Unlock()
-	return current.val, true
+	return currentEntry.val, true
 }
 
 // Set sets the value for the given key.
@@ -138,9 +138,9 @@ func (c *Cache[K, V]) Get(key K) (V, bool) {
 // the Replace method instead.
 func (c *Cache[K, V]) Set(key K, val V, exp Expiration) {
 	now := time.Now()
-	new := entry[K, V]{val: val}
-	exp.apply(&new.exp)
-	new.SetDefaultOrNothing(now, c.defaultExp, c.sliding)
+	newEntry := entry[K, V]{val: val}
+	exp.apply(&newEntry.exp)
+	newEntry.SetDefaultOrNothing(now, c.defaultExp, c.sliding)
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
@@ -148,17 +148,17 @@ func (c *Cache[K, V]) Set(key K, val V, exp Expiration) {
 	}
 	// Make sure that the shard is initialized.
 	c.init()
-	new.node = c.queue.AddNew(key)
-	current, ok := c.m[key]
-	c.m[key] = new
+	newEntry.node = c.queue.AddNew(key)
+	currentEntry, ok := c.m[key]
+	c.m[key] = newEntry
 	if ok {
-		c.queue.Remove(current.node)
+		c.queue.Remove(currentEntry.node)
 		c.mu.Unlock()
 		if c.onEviction != nil {
-			if current.HasExpired(now) {
-				c.onEviction(key, current.val, EvictionReasonExpired)
+			if currentEntry.HasExpired(now) {
+				c.onEviction(key, currentEntry.val, EvictionReasonExpired)
 			} else {
-				c.onEviction(key, current.val, EvictionReasonReplaced)
+				c.onEviction(key, currentEntry.val, EvictionReasonReplaced)
 			}
 		}
 		return
@@ -167,19 +167,19 @@ func (c *Cache[K, V]) Set(key K, val V, exp Expiration) {
 		c.mu.Unlock()
 		return
 	}
-	node := c.queue.Pop()
+	lruNode := c.queue.Pop()
 	if c.onEviction == nil {
-		delete(c.m, node.key)
+		delete(c.m, lruNode.key)
 		c.mu.Unlock()
 		return
 	}
-	toevict := c.m[node.key]
-	delete(c.m, node.key)
+	lruEntry := c.m[lruNode.key]
+	delete(c.m, lruNode.key)
 	c.mu.Unlock()
-	if toevict.HasExpired(now) {
-		c.onEviction(node.key, toevict.val, EvictionReasonExpired)
+	if lruEntry.HasExpired(now) {
+		c.onEviction(lruNode.key, lruEntry.val, EvictionReasonExpired)
 	} else {
-		c.onEviction(node.key, toevict.val, EvictionReasonMaxEntriesExceeded)
+		c.onEviction(lruNode.key, lruEntry.val, EvictionReasonMaxEntriesExceeded)
 	}
 }
 
@@ -190,9 +190,9 @@ func (c *Cache[K, V]) Set(key K, val V, exp Expiration) {
 // If it encounters an expired entry, the expired entry is evicted.
 func (c *Cache[K, V]) GetOrSet(key K, val V, exp Expiration) (V, bool) {
 	now := time.Now()
-	new := entry[K, V]{val: val}
-	exp.apply(&new.exp)
-	new.SetDefaultOrNothing(now, c.defaultExp, c.sliding)
+	newEntry := entry[K, V]{val: val}
+	exp.apply(&newEntry.exp)
+	newEntry.SetDefaultOrNothing(now, c.defaultExp, c.sliding)
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
@@ -201,45 +201,45 @@ func (c *Cache[K, V]) GetOrSet(key K, val V, exp Expiration) (V, bool) {
 	}
 	// Make sure that the shard is initialized.
 	c.init()
-	current, ok := c.m[key]
+	currentEntry, ok := c.m[key]
 	if !ok {
-		new.node = c.queue.AddNew(key)
-		c.m[key] = new
+		newEntry.node = c.queue.AddNew(key)
+		c.m[key] = newEntry
 		if c.maxEntriesLimit <= 0 || c.len() <= c.maxEntriesLimit {
 			c.mu.Unlock()
 			return val, false
 		}
-		node := c.queue.Pop()
+		lruNode := c.queue.Pop()
 		if c.onEviction == nil {
-			delete(c.m, node.key)
+			delete(c.m, lruNode.key)
 			c.mu.Unlock()
 			return val, false
 		}
-		toevict := c.m[node.key]
-		delete(c.m, node.key)
+		lruEntry := c.m[lruNode.key]
+		delete(c.m, lruNode.key)
 		c.mu.Unlock()
-		if toevict.HasExpired(now) {
-			c.onEviction(node.key, toevict.val, EvictionReasonExpired)
+		if lruEntry.HasExpired(now) {
+			c.onEviction(lruNode.key, lruEntry.val, EvictionReasonExpired)
 		} else {
-			c.onEviction(node.key, toevict.val, EvictionReasonMaxEntriesExceeded)
+			c.onEviction(lruNode.key, lruEntry.val, EvictionReasonMaxEntriesExceeded)
 		}
 		return val, false
 	}
-	c.queue.Remove(current.node)
-	if !current.HasExpired(now) {
-		if current.HasSlidingExpiration() {
-			current.SlideExpiration(now)
-			c.m[key] = current
+	c.queue.Remove(currentEntry.node)
+	if !currentEntry.HasExpired(now) {
+		if currentEntry.HasSlidingExpiration() {
+			currentEntry.SlideExpiration(now)
+			c.m[key] = currentEntry
 		}
-		c.queue.Add(current.node)
+		c.queue.Add(currentEntry.node)
 		c.mu.Unlock()
-		return current.val, true
+		return currentEntry.val, true
 	}
-	new.node = c.queue.AddNew(key)
-	c.m[key] = new
+	newEntry.node = c.queue.AddNew(key)
+	c.m[key] = newEntry
 	c.mu.Unlock()
 	if c.onEviction != nil {
-		c.onEviction(key, current.val, EvictionReasonExpired)
+		c.onEviction(key, currentEntry.val, EvictionReasonExpired)
 	}
 	return val, false
 }
@@ -253,34 +253,34 @@ func (c *Cache[K, V]) GetOrSet(key K, val V, exp Expiration) (V, bool) {
 // If you want to add or replace an entry, use the Set method instead.
 func (c *Cache[K, V]) Replace(key K, val V, exp Expiration) bool {
 	now := time.Now()
-	new := entry[K, V]{val: val}
-	exp.apply(&new.exp)
-	new.SetDefaultOrNothing(now, c.defaultExp, c.sliding)
+	newEntry := entry[K, V]{val: val}
+	exp.apply(&newEntry.exp)
+	newEntry.SetDefaultOrNothing(now, c.defaultExp, c.sliding)
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
 		return false
 	}
-	current, ok := c.m[key]
+	currentEntry, ok := c.m[key]
 	if !ok {
 		c.mu.Unlock()
 		return false
 	}
-	new.node = current.node
-	c.queue.Remove(current.node)
-	if current.HasExpired(now) {
+	newEntry.node = currentEntry.node
+	c.queue.Remove(currentEntry.node)
+	if currentEntry.HasExpired(now) {
 		delete(c.m, key)
 		c.mu.Unlock()
 		if c.onEviction != nil {
-			c.onEviction(key, current.val, EvictionReasonExpired)
+			c.onEviction(key, currentEntry.val, EvictionReasonExpired)
 		}
 		return false
 	}
-	c.queue.Add(new.node)
-	c.m[key] = new
+	c.queue.Add(newEntry.node)
+	c.m[key] = newEntry
 	c.mu.Unlock()
 	if c.onEviction != nil {
-		c.onEviction(key, current.val, EvictionReasonReplaced)
+		c.onEviction(key, currentEntry.val, EvictionReasonReplaced)
 	}
 	return true
 }
@@ -310,28 +310,81 @@ func (c *Cache[K, V]) ReplaceWithFunc(key K, f func(V) V, exp Expiration) bool {
 		c.mu.Unlock()
 		return false
 	}
-	current, ok := c.m[key]
+	currentEntry, ok := c.m[key]
 	if !ok {
 		c.mu.Unlock()
 		return false
 	}
-	c.queue.Remove(current.node)
-	if current.HasExpired(now) {
+	c.queue.Remove(currentEntry.node)
+	if currentEntry.HasExpired(now) {
 		delete(c.m, key)
 		c.mu.Unlock()
 		if c.onEviction != nil {
-			c.onEviction(key, current.val, EvictionReasonExpired)
+			c.onEviction(key, currentEntry.val, EvictionReasonExpired)
 		}
 		return false
 	}
-	new := entry[K, V]{val: f(current.val), node: current.node}
-	exp.apply(&new.exp)
-	new.SetDefaultOrNothing(now, c.defaultExp, c.sliding)
-	c.queue.Add(new.node)
-	c.m[key] = new
+	newEntry := entry[K, V]{val: f(currentEntry.val), node: currentEntry.node}
+	exp.apply(&newEntry.exp)
+	newEntry.SetDefaultOrNothing(now, c.defaultExp, c.sliding)
+	c.queue.Add(newEntry.node)
+	c.m[key] = newEntry
 	c.mu.Unlock()
 	if c.onEviction != nil {
-		c.onEviction(key, current.val, EvictionReasonReplaced)
+		c.onEviction(key, currentEntry.val, EvictionReasonReplaced)
+	}
+	return true
+}
+
+// ReplaceKey replaces the given old key with the new key.
+// The value remains the same. It returns true if the key is present
+// and replaced, otherwise it returns false. If there is an existing
+// entry for the new key, it is replaced.
+//
+// If it encounters an expired entry, the expired entry is evicted.
+func (c *Cache[K, V]) ReplaceKey(old, new K, exp Expiration) bool {
+	now := time.Now()
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return false
+	}
+	oldEntry, ok := c.m[old]
+	if !ok {
+		c.mu.Unlock()
+		return false
+	}
+	delete(c.m, old)
+	c.queue.Remove(oldEntry.node)
+	if oldEntry.HasExpired(now) {
+		c.mu.Unlock()
+		if c.onEviction != nil {
+			c.onEviction(old, oldEntry.val, EvictionReasonExpired)
+		}
+		return false
+	}
+	currentEntry, ok := c.m[new]
+	newEntry := entry[K, V]{val: oldEntry.val}
+	exp.apply(&newEntry.exp)
+	newEntry.SetDefaultOrNothing(now, c.defaultExp, c.sliding)
+	newEntry.node = c.queue.AddNew(new)
+	c.m[new] = newEntry
+	if !ok {
+		c.mu.Unlock()
+		if c.onEviction != nil {
+			c.onEviction(old, oldEntry.val, EvictionReasonKeyReplaced)
+		}
+		return true
+	}
+	c.queue.Remove(currentEntry.node)
+	c.mu.Unlock()
+	if c.onEviction != nil {
+		c.onEviction(old, oldEntry.val, EvictionReasonKeyReplaced)
+		if currentEntry.HasExpired(now) {
+			c.onEviction(new, currentEntry.val, EvictionReasonExpired)
+		} else {
+			c.onEviction(new, currentEntry.val, EvictionReasonReplaced)
+		}
 	}
 	return true
 }
@@ -351,22 +404,22 @@ func (c *Cache[K, V]) Remove(key K) bool {
 		c.mu.Unlock()
 		return false
 	}
-	current, ok := c.m[key]
+	currentEntry, ok := c.m[key]
 	if !ok {
 		c.mu.Unlock()
 		return false
 	}
 	delete(c.m, key)
-	c.queue.Remove(current.node)
+	c.queue.Remove(currentEntry.node)
 	c.mu.Unlock()
 	if c.onEviction == nil {
-		return !current.HasExpired(now)
+		return !currentEntry.HasExpired(now)
 	}
-	if current.HasExpired(now) {
-		c.onEviction(key, current.val, EvictionReasonExpired)
+	if currentEntry.HasExpired(now) {
+		c.onEviction(key, currentEntry.val, EvictionReasonExpired)
 		return false
 	}
-	c.onEviction(key, current.val, EvictionReasonRemoved)
+	c.onEviction(key, currentEntry.val, EvictionReasonRemoved)
 	return true
 }
 
@@ -678,6 +731,88 @@ func (s *Sharded[K, V]) Replace(key K, val V, exp Expiration) bool {
 //	_ = c.ReplaceWithFunc("foo", imcache.Increment[int32], imcache.WithNoExpiration())
 func (s *Sharded[K, V]) ReplaceWithFunc(key K, fn func(V) V, exp Expiration) bool {
 	return s.shard(key).ReplaceWithFunc(key, fn, exp)
+}
+
+// ReplaceKey replaces the given old key with the new key.
+// The value remains the same. It returns true if the key is present
+// and replaced, otherwise it returns false. If there is an existing
+// entry for the new key, it is replaced.
+//
+// If it encounters an expired entry, the expired entry is evicted.
+func (s *Sharded[K, V]) ReplaceKey(old, new K, exp Expiration) bool {
+	now := time.Now()
+	oldShard := s.shard(old)
+	newShard := s.shard(new)
+	// Check if the old and new keys are in the same shard.
+	if oldShard == newShard {
+		return oldShard.ReplaceKey(old, new, exp)
+	}
+	oldShard.mu.Lock()
+	// Check if the old shard is closed.
+	// If so it means that the Sharded is closed as well.
+	if oldShard.closed {
+		oldShard.mu.Unlock()
+		return false
+	}
+	oldShardEntry, ok := oldShard.m[old]
+	if !ok {
+		oldShard.mu.Unlock()
+		return false
+	}
+	oldShard.queue.Remove(oldShardEntry.node)
+	delete(oldShard.m, old)
+	if oldShardEntry.HasExpired(now) {
+		oldShard.mu.Unlock()
+		if oldShard.onEviction != nil {
+			oldShard.onEviction(old, oldShardEntry.val, EvictionReasonExpired)
+		}
+		return false
+	}
+	newShard.mu.Lock()
+	newShardEntry, ok := newShard.m[new]
+	if ok {
+		newShard.queue.Remove(newShardEntry.node)
+		delete(newShard.m, new)
+	}
+	newEntry := entry[K, V]{val: oldShardEntry.val}
+	newEntry.node = newShard.queue.AddNew(new)
+	exp.apply(&newEntry.exp)
+	newEntry.SetDefaultOrNothing(now, newShard.defaultExp, newShard.sliding)
+	newShard.m[new] = newEntry
+	if newShard.maxEntriesLimit <= 0 || newShard.len() <= newShard.maxEntriesLimit {
+		oldShard.mu.Unlock()
+		newShard.mu.Unlock()
+		// Both callbacks points to the same function.
+		if newShard.onEviction != nil {
+			newShard.onEviction(old, oldShardEntry.val, EvictionReasonKeyReplaced)
+			if ok {
+				if newShardEntry.HasExpired(now) {
+					newShard.onEviction(new, newShardEntry.val, EvictionReasonExpired)
+				} else {
+					newShard.onEviction(new, newShardEntry.val, EvictionReasonReplaced)
+				}
+			}
+		}
+		return true
+	}
+	lruNode := newShard.queue.Pop()
+	if newShard.onEviction == nil {
+		delete(newShard.m, lruNode.key)
+		oldShard.mu.Unlock()
+		newShard.mu.Unlock()
+		return true
+	}
+	lruEntry := newShard.m[lruNode.key]
+	delete(newShard.m, lruNode.key)
+	oldShard.mu.Unlock()
+	newShard.mu.Unlock()
+	newShard.onEviction(old, oldShardEntry.val, EvictionReasonKeyReplaced)
+	if lruEntry.HasExpired(now) {
+		newShard.onEviction(lruNode.key, lruEntry.val, EvictionReasonExpired)
+	} else {
+		newShard.onEviction(lruNode.key, lruEntry.val, EvictionReasonMaxEntriesExceeded)
+	}
+	return true
 }
 
 // Remove removes the cache entry for the given key.
