@@ -90,6 +90,7 @@ type Cache[K comparable, V any] struct {
 func (s *Cache[K, V]) init() {
 	if s.m == nil {
 		s.m = make(map[K]entry[K, V])
+		s.defaultExp = noExp
 		s.queue = &nopq[K]{}
 	}
 }

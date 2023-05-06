@@ -1545,8 +1545,15 @@ func TestNewSharded_NilHasher(t *testing.T) {
 func TestCache_ZeroValue(t *testing.T) {
 	var c Cache[string, string]
 	c.Set("foo", "bar", WithNoExpiration())
-	if v, ok := c.Get("foo"); !ok || v != "bar" {
-		t.Errorf("want Cache.Get(_) = %s, true, got %s, %t", "bar", v, ok)
+	if got, ok := c.Get("foo"); !ok || got != "bar" {
+		t.Errorf("Cache.Get(%s) = %s, %t, want %s, %t", "foo", got, ok, "bar", true)
+	}
+	// Make sure the zero value Cache has default expiration
+	// set to no expiration.
+	c.Set("bar", "foo", WithDefaultExpiration())
+	<-time.After(time.Millisecond)
+	if got, ok := c.Get("bar"); !ok || got != "foo" {
+		t.Errorf("Cache.Get(%s) = %s, %t, want %s, %t", "bar", got, ok, "foo", true)
 	}
 }
 
