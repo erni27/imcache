@@ -49,7 +49,7 @@ var caches = []struct {
 	{
 		name: "Sharded",
 		create: func() imcache[string, string] {
-			// Randomly different number of shards.
+			// Randomly test different number of shards.
 			shards := rand.Intn(10) + 1
 			return NewSharded[string, string](shards, DefaultStringHasher64{})
 		},
@@ -92,12 +92,8 @@ func TestImcache_Get(t *testing.T) {
 			t.Run(cache.name+" "+tt.name, func(t *testing.T) {
 				c := cache.create()
 				tt.setup(c)
-				got, ok := c.Get(tt.key)
-				if ok != tt.ok {
-					t.Fatalf("imcache.Get(%s) = _, %t, want _, %t", tt.key, ok, tt.ok)
-				}
-				if got != tt.want {
-					t.Errorf("imcache.Get(%s) = %v, _ want %v, _", tt.key, got, tt.want)
+				if got, ok := c.Get(tt.key); ok != tt.ok || got != tt.want {
+					t.Errorf("imcache.Get(%s) = %v, %t want %v, %t", tt.key, got, ok, tt.want, tt.ok)
 				}
 			})
 		}
@@ -162,12 +158,8 @@ func TestImcache_Set(t *testing.T) {
 				c := cache.create()
 				tt.setup(c)
 				c.Set(tt.key, tt.val, WithNoExpiration())
-				got, ok := c.Get(tt.key)
-				if !ok {
-					t.Fatalf("imcache.Get(%s) = _, %t, want _, true", tt.key, ok)
-				}
-				if got != tt.val {
-					t.Errorf("imcache.Get(%s) = %v, want %v", tt.key, got, tt.val)
+				if got, ok := c.Get(tt.key); !ok || got != tt.val {
+					t.Errorf("imcache.Get(%s) = %v, %t want %v, true", tt.key, got, ok, tt.val)
 				}
 			})
 		}
@@ -216,12 +208,8 @@ func TestImcache_GetOrSet(t *testing.T) {
 			t.Run(cache.name+" "+tt.name, func(t *testing.T) {
 				c := cache.create()
 				tt.setup(c)
-				got, ok := c.GetOrSet(tt.key, tt.val, WithDefaultExpiration())
-				if ok != tt.present {
-					t.Errorf("imcache.GetOrSet(%s, _, _) = _, %t, want _, %t", tt.key, ok, tt.present)
-				}
-				if got != tt.want {
-					t.Errorf("imcache.GetOrSet(%s, _, _) = %v, _, want %v, _", tt.key, got, tt.want)
+				if got, ok := c.GetOrSet(tt.key, tt.val, WithDefaultExpiration()); ok != tt.present || got != tt.want {
+					t.Errorf("imcache.GetOrSet(%s, %s, _) = %v, %t want %v, %t", tt.key, tt.val, got, ok, tt.want, tt.present)
 				}
 			})
 		}
@@ -235,7 +223,7 @@ func TestImcache_GetOrSet_SlidingExpiration(t *testing.T) {
 			c.Set("foo", "foo", WithSlidingExpiration(500*time.Millisecond))
 			<-time.After(300 * time.Millisecond)
 			if _, ok := c.GetOrSet("foo", "bar", WithSlidingExpiration(500*time.Millisecond)); !ok {
-				t.Errorf("Cache.GetOrSet(%s, _, _) = _, %t, want _, true", "foo", ok)
+				t.Errorf("imcache.GetOrSet(%s, _, _) = _, %t, want _, true", "foo", ok)
 			}
 			<-time.After(300 * time.Millisecond)
 			if _, ok := c.GetOrSet("foo", "bar", WithSlidingExpiration(500*time.Millisecond)); !ok {
@@ -294,7 +282,7 @@ func TestImcache_Replace(t *testing.T) {
 				}
 
 				if got, ok := c.Get(tt.key); ok != tt.present || got != tt.want {
-					t.Fatalf("imcache.Get(%s) = %v, %t, want %v, %t", tt.key, got, ok, tt.want, tt.present)
+					t.Errorf("imcache.Get(%s) = %v, %t, want %v, %t", tt.key, got, ok, tt.want, tt.present)
 				}
 			})
 		}
@@ -359,7 +347,7 @@ func TestImcache_ReplaceWithFunc(t *testing.T) {
 				}
 
 				if got, ok := c.Get(tt.key); ok != tt.present || got != tt.val {
-					t.Fatalf("imcache.Get(%s) = %v, %t, want %v, %t", tt.key, got, ok, tt.val, tt.present)
+					t.Errorf("imcache.Get(%s) = %v, %t, want %v, %t", tt.key, got, ok, tt.val, tt.present)
 				}
 			})
 		}
@@ -873,7 +861,7 @@ func TestImcache_Close(t *testing.T) {
 
 // cachesWithEvictionCallback is a list of string-interface{}
 // caches with eviction callback to test.
-// If a test needs different type of cache or with more sophisticated
+// If a test needs different type of cache or one with more sophisticated
 // configuration, it should be created within the test.
 var cachesWithEvictionCallback = []struct {
 	name   string
