@@ -287,24 +287,24 @@ func (c *Cache[K, V]) Replace(key K, val V, exp Expiration) bool {
 }
 
 // ReplaceWithFunc replaces the value for the given key with the result
-// of the given function that takes the old value as an argument.
+// of the given function that takes the current value as an argument.
 // It returns true if the value is present and replaced, otherwise it returns
 // false.
 //
 // If it encounters an expired entry, the expired entry is evicted.
 //
-// If you want to replace the value with a new value not depending on the old
-// value, use the Replace method instead.
+// If you want to replace the value with a new value not depending on
+// the current value, use the Replace method instead.
 //
 // imcache provides the Increment and Decrement functions that can be used as f
-// to increment or decrement the old numeric type value.
+// to increment or decrement the current numeric type value.
 //
 // Example:
 //
 //	var c imcache.Cache[string, int32]
 //	c.Set("foo", 997, imcache.WithNoExpiration())
 //	_ = c.ReplaceWithFunc("foo", imcache.Increment[int32], imcache.WithNoExpiration())
-func (c *Cache[K, V]) ReplaceWithFunc(key K, f func(V) V, exp Expiration) bool {
+func (c *Cache[K, V]) ReplaceWithFunc(key K, f func(current V) (new V), exp Expiration) bool {
 	now := time.Now()
 	c.mu.Lock()
 	if c.closed {
