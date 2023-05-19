@@ -1,6 +1,7 @@
 package imcache
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"reflect"
@@ -687,20 +688,17 @@ func (m *evictionCallbackMock) HasEventuallyBeenCalledWith(t *testing.T, key str
 	t.Helper()
 	initialBackoff := 20 * time.Millisecond
 	backoffCoefficient := 2
+	var lastIndex int
 	for i := 0; i < 5; i++ {
 		m.mu.Lock()
-		calls := make([]evictionCallbackCall, 0, len(m.calls))
-		for _, c := range m.calls {
-			if c.key == key {
-				calls = append(calls, c)
-			}
-		}
-		m.mu.Unlock()
-		for _, c := range calls {
-			if c.val == val && c.reason == reason {
+		for i := lastIndex; i < len(m.calls); i++ {
+			if m.calls[i].key == key && m.calls[i].val == val && m.calls[i].reason == reason {
+				m.mu.Unlock()
 				return
 			}
 		}
+		lastIndex = len(m.calls)
+		m.mu.Unlock()
 		<-time.After(initialBackoff)
 		initialBackoff *= time.Duration(backoffCoefficient)
 	}
@@ -1356,5 +1354,233 @@ func TestCache_MaxEntriesLimit_LessOrEqual0(t *testing.T) {
 	c := New(WithMaxEntriesOption[string, string](0))
 	if _, ok := c.queue.(*nopq[string]); !ok {
 		t.Error("Cache.queue = _, want *nopq")
+	}
+}
+
+type longRunningEvictionCallback struct {
+	ctx context.Context
+}
+
+func (c *longRunningEvictionCallback) Callback(key, value string, reason EvictionReason) {
+	<-c.ctx.Done()
+}
+
+func TestImcache_LongRunning_EvictionCallback(t *testing.T) {
+	tests := []struct {
+		name    string
+		execute func(imcache[string, string])
+	}{
+		{
+			name: "Get evict expired entry",
+			execute: func(c imcache[string, string]) {
+				c.Set("foo", "bar", WithExpirationDate(time.Now().Add(-1*time.Second)))
+				c.Get("foo")
+			},
+		},
+		{
+			name: "Set evict replaced entry",
+			execute: func(c imcache[string, string]) {
+				c.Set("foo", "bar", WithNoExpiration())
+				c.Set("foo", "foo", WithNoExpiration())
+			},
+		},
+		{
+			name: "Set evict expired entry",
+			execute: func(c imcache[string, string]) {
+				c.Set("foo", "bar", WithExpirationDate(time.Now().Add(-1*time.Second)))
+				c.Set("foo", "foo", WithNoExpiration())
+			},
+		},
+		{
+			name: "Set evict expired entry if max entries limit exceeded",
+			execute: func(c imcache[string, string]) {
+				c.Set("foo1", "bar", WithExpirationDate(time.Now().Add(-1*time.Second)))
+				c.Set("foo3", "foo", WithNoExpiration())
+				c.Set("foo5", "foobar", WithNoExpiration())
+			},
+		},
+		{
+			name: "Set evict entry if max entries limit exceeded",
+			execute: func(c imcache[string, string]) {
+				c.Set("foo1", "bar", WithNoExpiration())
+				c.Set("foo3", "foo", WithNoExpiration())
+				c.Set("foo5", "foobar", WithNoExpiration())
+			},
+		},
+		{
+			name: "GetOrSet evict expired entry",
+			execute: func(c imcache[string, string]) {
+				c.Set("foo", "bar", WithExpirationDate(time.Now().Add(-1*time.Second)))
+				c.GetOrSet("foo", "foo", WithNoExpiration())
+			},
+		},
+		{
+			name: "GetOrSet evict expired entry if max entries limit exceeded",
+			execute: func(c imcache[string, string]) {
+				c.Set("foo1", "bar", WithExpirationDate(time.Now().Add(-1*time.Second)))
+				c.Set("foo3", "foo", WithNoExpiration())
+				c.GetOrSet("foo5", "foobar", WithNoExpiration())
+			},
+		},
+		{
+			name: "GetOrSet evict entry if max entries limit exceeded",
+			execute: func(c imcache[string, string]) {
+				c.Set("foo1", "bar", WithNoExpiration())
+				c.Set("foo3", "foo", WithNoExpiration())
+				c.GetOrSet("foo5", "foobar", WithNoExpiration())
+			},
+		},
+		{
+			name: "Replace evict expired entry",
+			execute: func(c imcache[string, string]) {
+				c.Set("foo", "bar", WithExpirationDate(time.Now().Add(-1*time.Second)))
+				c.Replace("foo", "foo", WithNoExpiration())
+			},
+		},
+		{
+			name: "Replace evict replaced entry",
+			execute: func(c imcache[string, string]) {
+				c.Set("foo", "bar", WithNoExpiration())
+				c.Replace("foo", "foo", WithNoExpiration())
+			},
+		},
+		{
+			name: "ReplaceWithFunc evict expired entry",
+			execute: func(c imcache[string, string]) {
+				c.Set("foo", "bar", WithExpirationDate(time.Now().Add(-1*time.Second)))
+				c.ReplaceWithFunc("foo", func(_ string) string { return "foo" }, WithNoExpiration())
+			},
+		},
+		{
+			name: "ReplaceWithFunc evict replaced entry",
+			execute: func(c imcache[string, string]) {
+				c.Set("foo", "bar", WithNoExpiration())
+				c.ReplaceWithFunc("foo", func(_ string) string { return "foo" }, WithNoExpiration())
+			},
+		},
+		{
+			name: "ReplaceKey evict expired entry under old key",
+			execute: func(c imcache[string, string]) {
+				c.Set("foo1", "bar", WithExpirationDate(time.Now().Add(-1*time.Second)))
+				c.ReplaceKey("foo1", "foo2", WithNoExpiration())
+			},
+		},
+		{
+			name: "ReplaceKey evict expired entry under new key",
+			execute: func(c imcache[string, string]) {
+				c.Set("bar", "foo", WithNoExpiration())
+				c.Set("foo", "bar", WithExpirationDate(time.Now().Add(-1*time.Second)))
+				c.ReplaceKey("bar", "foo", WithNoExpiration())
+			},
+		},
+		{
+			name: "ReplaceKey evict replaced entry under new key",
+			execute: func(c imcache[string, string]) {
+				c.Set("bar", "foo", WithNoExpiration())
+				c.Set("foo", "bar", WithNoExpiration())
+				c.ReplaceKey("bar", "foo", WithNoExpiration())
+			},
+		},
+		{
+			name: "ReplaceKey evict replaced key entry",
+			execute: func(c imcache[string, string]) {
+				c.Set("bar", "foo", WithNoExpiration())
+				c.ReplaceKey("bar", "foo", WithNoExpiration())
+			},
+		},
+		{
+			name: "Remove evict expired entry",
+			execute: func(c imcache[string, string]) {
+				c.Set("bar", "foo", WithExpirationDate(time.Now().Add(-1*time.Second)))
+				c.Remove("bar")
+			},
+		},
+		{
+			name: "Remove evict removed entry",
+			execute: func(c imcache[string, string]) {
+				c.Set("bar", "foo", WithNoExpiration())
+				c.Remove("bar")
+			},
+		},
+		{
+			name: "RemoveAll evict removed and expired entries",
+			execute: func(c imcache[string, string]) {
+				c.Set("bar", "foo", WithNoExpiration())
+				c.Set("foo", "bar", WithExpirationDate(time.Now().Add(-1*time.Second)))
+				c.RemoveAll()
+			},
+		},
+		{
+			name: "RemoveExpired evict expired entry",
+			execute: func(c imcache[string, string]) {
+				c.Set("bar", "foo", WithNoExpiration())
+				c.Set("foo", "bar", WithExpirationDate(time.Now().Add(-1*time.Second)))
+				c.RemoveExpired()
+			},
+		},
+		{
+			name: "GetAll evict expired entry",
+			execute: func(c imcache[string, string]) {
+				c.Set("bar", "foo", WithNoExpiration())
+				c.Set("foo", "bar", WithExpirationDate(time.Now().Add(-1*time.Second)))
+				c.GetAll()
+			},
+		},
+	}
+	caches := []struct {
+		name   string
+		create func(EvictionCallback[string, string]) imcache[string, string]
+	}{
+		{
+			name: "Cache",
+			create: func(ec EvictionCallback[string, string]) imcache[string, string] {
+				return New[string, string](WithEvictionCallbackOption[string, string](ec), WithMaxEntriesOption[string, string](2))
+			},
+		},
+		{
+			name: "Sharded",
+			create: func(ec EvictionCallback[string, string]) imcache[string, string] {
+				return NewSharded[string, string](2, DefaultStringHasher64{}, WithEvictionCallbackOption[string, string](ec), WithMaxEntriesOption[string, string](2))
+			},
+		},
+	}
+	for _, cache := range caches {
+		for _, tt := range tests {
+			t.Run(cache.name+" "+tt.name, func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				ec := &longRunningEvictionCallback{ctx: ctx}
+				c := cache.create(ec.Callback)
+				done := make(chan struct{})
+				go func() {
+					tt.execute(c)
+					close(done)
+				}()
+				select {
+				case <-done:
+				case <-ctx.Done():
+					t.Errorf("%s should not block on a long running eviction callback", cache.name)
+				}
+			})
+		}
+	}
+}
+
+func TestSharded_ReplaceKey_LongRunning_EvictionCallback_MaxEntriesLimit(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	ec := &longRunningEvictionCallback{ctx: ctx}
+	c := NewSharded[string, string](2, DefaultStringHasher64{}, WithEvictionCallbackOption[string, string](ec.Callback), WithMaxEntriesOption[string, string](1))
+	c.Set("foo1", "bar", WithNoExpiration())
+	c.Set("foo2", "bar", WithNoExpiration())
+	done := make(chan struct{})
+	go func() {
+		c.ReplaceKey("foo1", "foo4", WithNoExpiration())
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Error("ReplaceKey should not block on a long running eviction callback")
 	}
 }
