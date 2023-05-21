@@ -124,6 +124,8 @@ func main() {
 }
 ```
 
+`EvictionCallback` is invoked in a separate goroutine to not block any `Cache` or `Sharded` method.
+
 ### Max entries limit
 
 `imcache` supports max entries limit. It uses simple LRU eviction policy. If the max entries limit is set, the cache evicts the least recently used entry when the max entries limit is reached. The least recently used entry is evicted regardless of the entry's expiration time. This allows `imcache` to remain simple and efficient.
