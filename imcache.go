@@ -451,7 +451,7 @@ func (c *Cache[K, V]) removeAll(now time.Time) {
 		c.queue = &nopq[K]{}
 	}
 	c.mu.Unlock()
-	if c.onEviction != nil {
+	if c.onEviction != nil && len(removedEntries) != 0 {
 		go func() {
 			for key, entry := range removedEntries {
 				if entry.HasExpired(now) {
@@ -496,11 +496,13 @@ func (c *Cache[K, V]) removeExpired(now time.Time) {
 		}
 	}
 	c.mu.Unlock()
-	go func() {
-		for _, kv := range removedEntries {
-			c.onEviction(kv.key, kv.val, EvictionReasonExpired)
-		}
-	}()
+	if len(removedEntries) != 0 {
+		go func() {
+			for _, kv := range removedEntries {
+				c.onEviction(kv.key, kv.val, EvictionReasonExpired)
+			}
+		}()
+	}
 }
 
 // GetAll returns a copy of all entries in the cache.
@@ -549,11 +551,13 @@ func (c *Cache[K, V]) getAll(now time.Time) map[K]V {
 		}
 	}
 	c.mu.Unlock()
-	go func() {
-		for _, kv := range expiredEntries {
-			c.onEviction(kv.key, kv.val, EvictionReasonExpired)
-		}
-	}()
+	if len(expiredEntries) != 0 {
+		go func() {
+			for _, kv := range expiredEntries {
+				c.onEviction(kv.key, kv.val, EvictionReasonExpired)
+			}
+		}()
+	}
 	return m
 }
 

@@ -686,7 +686,7 @@ func (m *evictionCallbackMock) Callback(key string, val interface{}, reason Evic
 
 func (m *evictionCallbackMock) HasEventuallyBeenCalledWith(t *testing.T, key string, val interface{}, reason EvictionReason) {
 	t.Helper()
-	initialBackoff := 20 * time.Millisecond
+	backoff := 20 * time.Millisecond
 	backoffCoefficient := 2
 	var lastIndex int
 	for i := 0; i < 5; i++ {
@@ -699,8 +699,8 @@ func (m *evictionCallbackMock) HasEventuallyBeenCalledWith(t *testing.T, key str
 		}
 		lastIndex = len(m.calls)
 		m.mu.Unlock()
-		<-time.After(initialBackoff)
-		initialBackoff *= time.Duration(backoffCoefficient)
+		<-time.After(backoff)
+		backoff *= time.Duration(backoffCoefficient)
 	}
 	t.Fatalf("want EvictionCallback called with key=%s, val=%v, reason=%s", key, val, reason)
 }
@@ -1358,11 +1358,11 @@ func TestCache_MaxEntriesLimit_LessOrEqual0(t *testing.T) {
 }
 
 type longRunningEvictionCallback struct {
-	ctx context.Context
+	done chan struct{}
 }
 
 func (c *longRunningEvictionCallback) Callback(key, value string, reason EvictionReason) {
-	<-c.ctx.Done()
+	<-c.done
 }
 
 func TestImcache_LongRunning_EvictionCallback(t *testing.T) {
@@ -1549,7 +1549,9 @@ func TestImcache_LongRunning_EvictionCallback(t *testing.T) {
 			t.Run(cache.name+" "+tt.name, func(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 				defer cancel()
-				ec := &longRunningEvictionCallback{ctx: ctx}
+				ecDoneCh := make(chan struct{})
+				ec := &longRunningEvictionCallback{done: ecDoneCh}
+				defer func() { close(ecDoneCh) }()
 				c := cache.create(ec.Callback)
 				done := make(chan struct{})
 				go func() {
@@ -1569,7 +1571,9 @@ func TestImcache_LongRunning_EvictionCallback(t *testing.T) {
 func TestSharded_ReplaceKey_LongRunning_EvictionCallback_MaxEntriesLimit(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	ec := &longRunningEvictionCallback{ctx: ctx}
+	ecDoneCh := make(chan struct{})
+	ec := &longRunningEvictionCallback{done: ecDoneCh}
+	defer func() { close(ecDoneCh) }()
 	c := NewSharded[string, string](2, DefaultStringHasher64{}, WithEvictionCallbackOption[string, string](ec.Callback), WithMaxEntriesOption[string, string](1))
 	c.Set("foo1", "bar", WithNoExpiration())
 	c.Set("foo2", "bar", WithNoExpiration())
