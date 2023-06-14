@@ -129,6 +129,66 @@ func (c *Cache[K, V]) Get(key K) (V, bool) {
 	return currentEntry.val, true
 }
 
+// GetMultiple returns the values for the given keys.
+//
+// If it encounters an expired entry, the expired entry is evicted.
+func (c *Cache[K, V]) GetMultiple(keys ...K) map[K]V {
+	now := time.Now()
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return nil
+	}
+	result := make(map[K]V, len(keys))
+	if c.onEviction == nil {
+		for _, key := range keys {
+			currentEntry, ok := c.m[key]
+			if !ok {
+				continue
+			}
+			c.queue.Remove(currentEntry.node)
+			if currentEntry.HasExpired(now) {
+				delete(c.m, key)
+				continue
+			}
+			if currentEntry.HasSlidingExpiration() {
+				currentEntry.SlideExpiration(now)
+				c.m[key] = currentEntry
+			}
+			c.queue.Add(currentEntry.node)
+			result[key] = currentEntry.val
+		}
+		c.mu.Unlock()
+		return result
+	}
+	var expiredEntries []kv[K, V]
+	for _, key := range keys {
+		currentEntry, ok := c.m[key]
+		if !ok {
+			continue
+		}
+		c.queue.Remove(currentEntry.node)
+		if currentEntry.HasExpired(now) {
+			expiredEntries = append(expiredEntries, kv[K, V]{key: key, val: currentEntry.val})
+			delete(c.m, key)
+			continue
+		}
+		if currentEntry.HasSlidingExpiration() {
+			currentEntry.SlideExpiration(now)
+			c.m[key] = currentEntry
+		}
+		c.queue.Add(currentEntry.node)
+		result[key] = currentEntry.val
+	}
+	c.mu.Unlock()
+	go func() {
+		for _, expiredEntry := range expiredEntries {
+			c.onEviction(expiredEntry.key, expiredEntry.val, EvictionReasonExpired)
+		}
+	}()
+	return result
+}
+
 // Set sets the value for the given key.
 // If the entry already exists, it is replaced.
 //
