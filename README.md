@@ -254,4 +254,4 @@ PASS
 ok  	github.com/erni27/imcache	74.508s
 ```
 
-When it comes to writes, the vanilla Go map is the fastest even if accessed by multiple goroutines. The advantage is around 30 ns/op when compared to `Sharded` and 60 ns/op when compared to `Sharded` with max entries limit set. It is caused by the fact, internally `Cache` does a few checks before writing the value into the internal map to ensure safety and proper eviction. Again both `Cache` and `Sharded` are slightly slower when max entries limit is set.
+When it comes to writes, the vanilla Go map is the fastest even if accessed by multiple goroutines. Vanilla Go is around 7% faster than `Sharded` and around 12% faster than `Sharded` with max entries limit set. It is caused by the fact, internally `Cache` does a few checks before writing the value into the internal map to ensure safety and proper eviction. Again both `Cache` and `Sharded` are slightly slower when max entries limit is set.
