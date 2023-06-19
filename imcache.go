@@ -249,7 +249,7 @@ func (c *Cache[K, V]) Set(key K, val V, exp Expiration) {
 // and false.
 //
 // If it encounters an expired entry, the expired entry is evicted.
-func (c *Cache[K, V]) GetOrSet(key K, val V, exp Expiration) (V, bool) {
+func (c *Cache[K, V]) GetOrSet(key K, val V, exp Expiration) (value V, present bool) {
 	now := time.Now()
 	newEntry := entry[K, V]{val: val}
 	exp.apply(&newEntry.exp)
@@ -312,7 +312,7 @@ func (c *Cache[K, V]) GetOrSet(key K, val V, exp Expiration) (V, bool) {
 // If it encounters an expired entry, the expired entry is evicted.
 //
 // If you want to add or replace an entry, use the Set method instead.
-func (c *Cache[K, V]) Replace(key K, val V, exp Expiration) bool {
+func (c *Cache[K, V]) Replace(key K, val V, exp Expiration) (present bool) {
 	now := time.Now()
 	newEntry := entry[K, V]{val: val}
 	exp.apply(&newEntry.exp)
@@ -364,7 +364,7 @@ func (c *Cache[K, V]) Replace(key K, val V, exp Expiration) bool {
 //	var c imcache.Cache[string, int32]
 //	c.Set("foo", 997, imcache.WithNoExpiration())
 //	_ = c.ReplaceWithFunc("foo", imcache.Increment[int32], imcache.WithNoExpiration())
-func (c *Cache[K, V]) ReplaceWithFunc(key K, f func(current V) (new V), exp Expiration) bool {
+func (c *Cache[K, V]) ReplaceWithFunc(key K, f func(current V) (new V), exp Expiration) (present bool) {
 	now := time.Now()
 	c.mu.Lock()
 	if c.closed {
@@ -403,7 +403,7 @@ func (c *Cache[K, V]) ReplaceWithFunc(key K, f func(current V) (new V), exp Expi
 // entry for the new key, it is replaced.
 //
 // If it encounters an expired entry, the expired entry is evicted.
-func (c *Cache[K, V]) ReplaceKey(old, new K, exp Expiration) bool {
+func (c *Cache[K, V]) ReplaceKey(old, new K, exp Expiration) (present bool) {
 	now := time.Now()
 	c.mu.Lock()
 	if c.closed {
@@ -460,7 +460,7 @@ func (c *Cache[K, V]) ReplaceKey(old, new K, exp Expiration) bool {
 // If it encounters an expired entry, the expired entry is evicted.
 // It results in calling the eviction callback with EvictionReasonExpired,
 // not EvictionReasonRemoved. If entry is expired, it returns false.
-func (c *Cache[K, V]) Remove(key K) bool {
+func (c *Cache[K, V]) Remove(key K) (present bool) {
 	now := time.Now()
 	c.mu.Lock()
 	if c.closed {
@@ -748,7 +748,7 @@ func (s *Sharded[K, V]) shard(key K) *Cache[K, V] {
 // Get returns the value for the given key.
 //
 // If it encounters an expired entry, the expired entry is evicted.
-func (s *Sharded[K, V]) Get(key K) (V, bool) {
+func (s *Sharded[K, V]) Get(key K) (value V, present bool) {
 	return s.shard(key).Get(key)
 }
 
@@ -769,7 +769,7 @@ func (s *Sharded[K, V]) Set(key K, val V, exp Expiration) {
 // and false.
 //
 // If it encounters an expired entry, the expired entry is evicted.
-func (s *Sharded[K, V]) GetOrSet(key K, val V, exp Expiration) (v V, present bool) {
+func (s *Sharded[K, V]) GetOrSet(key K, val V, exp Expiration) (value V, present bool) {
 	return s.shard(key).GetOrSet(key, val, exp)
 }
 
@@ -780,7 +780,7 @@ func (s *Sharded[K, V]) GetOrSet(key K, val V, exp Expiration) (v V, present boo
 // If it encounters an expired entry, the expired entry is evicted.
 //
 // If you want to add or replace an entry, use the Set method instead.
-func (s *Sharded[K, V]) Replace(key K, val V, exp Expiration) bool {
+func (s *Sharded[K, V]) Replace(key K, val V, exp Expiration) (present bool) {
 	return s.shard(key).Replace(key, val, exp)
 }
 
@@ -802,7 +802,7 @@ func (s *Sharded[K, V]) Replace(key K, val V, exp Expiration) bool {
 //	c := imcache.NewSharded[string, int32](4, imcache.DefaultStringHasher64{})
 //	c.Set("foo", 997, imcache.WithNoExpiration())
 //	_ = c.ReplaceWithFunc("foo", imcache.Increment[int32], imcache.WithNoExpiration())
-func (s *Sharded[K, V]) ReplaceWithFunc(key K, fn func(V) V, exp Expiration) bool {
+func (s *Sharded[K, V]) ReplaceWithFunc(key K, fn func(V) V, exp Expiration) (present bool) {
 	return s.shard(key).ReplaceWithFunc(key, fn, exp)
 }
 
@@ -812,7 +812,7 @@ func (s *Sharded[K, V]) ReplaceWithFunc(key K, fn func(V) V, exp Expiration) boo
 // entry for the new key, it is replaced.
 //
 // If it encounters an expired entry, the expired entry is evicted.
-func (s *Sharded[K, V]) ReplaceKey(old, new K, exp Expiration) bool {
+func (s *Sharded[K, V]) ReplaceKey(old, new K, exp Expiration) (present bool) {
 	now := time.Now()
 	oldShard := s.shard(old)
 	newShard := s.shard(new)
@@ -899,7 +899,7 @@ func (s *Sharded[K, V]) ReplaceKey(old, new K, exp Expiration) bool {
 // If it encounters an expired entry, the expired entry is evicted.
 // It results in calling the eviction callback with EvictionReasonExpired,
 // not EvictionReasonRemoved. If entry is expired, it returns false.
-func (s *Sharded[K, V]) Remove(key K) bool {
+func (s *Sharded[K, V]) Remove(key K) (present bool) {
 	return s.shard(key).Remove(key)
 }
 
