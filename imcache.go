@@ -130,6 +130,7 @@ func (c *Cache[K, V]) Get(key K) (V, bool) {
 }
 
 // GetMultiple returns the values for the given keys.
+// If the Cache is not closed, then the returned map is always non-nil.
 //
 // If it encounters an expired entry, the expired entry is evicted.
 func (c *Cache[K, V]) GetMultiple(keys ...K) map[K]V {
@@ -139,7 +140,8 @@ func (c *Cache[K, V]) GetMultiple(keys ...K) map[K]V {
 		c.mu.Unlock()
 		return nil
 	}
-	result := make(map[K]V, len(keys))
+	m := make(map[K]V, len(keys))
+	// To avoid copying the expired entries if there's no eviction callback.
 	if c.onEviction == nil {
 		for _, key := range keys {
 			currentEntry, ok := c.m[key]
@@ -156,10 +158,10 @@ func (c *Cache[K, V]) GetMultiple(keys ...K) map[K]V {
 				c.m[key] = currentEntry
 			}
 			c.queue.Add(currentEntry.node)
-			result[key] = currentEntry.val
+			m[key] = currentEntry.val
 		}
 		c.mu.Unlock()
-		return result
+		return m
 	}
 	var expiredEntries []kv[K, V]
 	for _, key := range keys {
@@ -178,7 +180,7 @@ func (c *Cache[K, V]) GetMultiple(keys ...K) map[K]V {
 			c.m[key] = currentEntry
 		}
 		c.queue.Add(currentEntry.node)
-		result[key] = currentEntry.val
+		m[key] = currentEntry.val
 	}
 	c.mu.Unlock()
 	go func() {
@@ -186,7 +188,7 @@ func (c *Cache[K, V]) GetMultiple(keys ...K) map[K]V {
 			c.onEviction(expiredEntry.key, expiredEntry.val, EvictionReasonExpired)
 		}
 	}()
-	return result
+	return m
 }
 
 // Set sets the value for the given key.
@@ -742,7 +744,12 @@ type Sharded[K comparable, V any] struct {
 
 // shard returns the shard for the given key.
 func (s *Sharded[K, V]) shard(key K) *Cache[K, V] {
-	return s.shards[s.hasher.Sum64(key)&s.mask]
+	return s.shards[s.shardIndex(key)]
+}
+
+// shardIndex returns the shard index for the given key.
+func (s *Sharded[K, V]) shardIndex(key K) int {
+	return int(s.hasher.Sum64(key) & s.mask)
 }
 
 // Get returns the value for the given key.
@@ -750,6 +757,30 @@ func (s *Sharded[K, V]) shard(key K) *Cache[K, V] {
 // If it encounters an expired entry, the expired entry is evicted.
 func (s *Sharded[K, V]) Get(key K) (value V, present bool) {
 	return s.shard(key).Get(key)
+}
+
+// GetMultiple returns the values for the given keys.
+// If the Sharded is not closed, then the returned map is always non-nil.
+//
+// If it encounters an expired entry, the expired entry is evicted.
+func (s *Sharded[K, V]) GetMultiple(keys ...K) map[K]V {
+	shardsIndices := make(map[int][]K)
+	for _, key := range keys {
+		shardsIndices[s.shardIndex(key)] = append(shardsIndices[s.shardIndex(key)], key)
+	}
+	ms := make(map[K]V)
+	for shardIndex, keys := range shardsIndices {
+		m := s.shards[shardIndex].GetMultiple(keys...)
+		if m == nil {
+			// GetMultiple returns nil if the shard is closed.
+			// If the shard is closed, then the Sharded is closed too.
+			return nil
+		}
+		for k, v := range m {
+			ms[k] = v
+		}
+	}
+	return ms
 }
 
 // Set sets the value for the given key.
