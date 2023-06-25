@@ -768,7 +768,8 @@ func (s *Sharded[K, V]) GetMultiple(keys ...K) map[K]V {
 	for _, key := range keys {
 		shardsIndices[s.shardIndex(key)] = append(shardsIndices[s.shardIndex(key)], key)
 	}
-	ms := make(map[K]V)
+	ms := make([]map[K]V, len(shardsIndices))
+	var n int
 	for shardIndex, keys := range shardsIndices {
 		m := s.shards[shardIndex].GetMultiple(keys...)
 		if m == nil {
@@ -776,11 +777,16 @@ func (s *Sharded[K, V]) GetMultiple(keys ...K) map[K]V {
 			// If the shard is closed, then the Sharded is closed too.
 			return nil
 		}
+		ms = append(ms, m)
+		n += len(m)
+	}
+	result := make(map[K]V, n)
+	for _, m := range ms {
 		for k, v := range m {
-			ms[k] = v
+			result[k] = v
 		}
 	}
-	return ms
+	return result
 }
 
 // Set sets the value for the given key.
