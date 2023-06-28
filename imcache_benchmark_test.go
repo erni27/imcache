@@ -26,7 +26,7 @@ func BenchmarkCache_Get(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if v, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); ok {
-			_ = (token)(v)
+			_ = v
 		}
 	}
 }
@@ -43,7 +43,7 @@ func BenchmarkSharded_Get(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				if v, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); ok {
-					_ = (token)(v)
+					_ = v
 				}
 			}
 		})
@@ -60,7 +60,7 @@ func BenchmarkCache_Get_MaxEntriesLimit(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if v, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); ok {
-			_ = (token)(v)
+			_ = v
 		}
 	}
 }
@@ -77,7 +77,7 @@ func BenchmarkSharded_Get_MaxEntriesLimit(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				if v, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); ok {
-					_ = (token)(v)
+					_ = v
 				}
 			}
 		})
