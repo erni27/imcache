@@ -47,7 +47,7 @@ func main() {
 
 * No expiration means that the entry will never expire.
 * Absolute expiration means that the entry will expire after a certain time.
-* Sliding expiration means that the entry will expire after a certain time if it hasn't been accessed. The expiration time is reset every time the entry is accessed. In other words the expiration time is slided to now + sliding expiration time where now is the time when the entry was accessed (read or write).
+* Sliding expiration means that the entry will expire after a certain time if it hasn't been accessed. The expiration time is reset every time the entry is accessed. In other words the expiration time is slided to now + sliding expiration time when now is the time when the entry was accessed (read or write).
 
 ```go
 // Set a new value with no expiration time.
@@ -65,7 +65,7 @@ c.Set(3, "three", imcache.WithExpirationDate(time.Now().Add(time.Second)))
 c.Set(4, "four", imcache.WithSlidingExpiration(time.Second))
 ```
 
-If you want to use default expiration time for the given cache instance, you can use the `WithDefaultExpiration` `Expiration` option. By default the default expiration time is set to no expiration. You can set the default expiration time when creating a new `Cache` or `Sharded` instance. More on sharding can be found in the [Sharding](#sharding) section.
+If you want to use default expiration time for the given cache instance, you can use the `WithDefaultExpiration` `Expiration` option. By default, the expiration time is set to no expiration. You can set the default expiration time when creating a new `Cache` or `Sharded` instance. More on sharding can be found in the [Sharding](#sharding) section.
 
 ```go
 // Create a new non-sharded cache instance with default absolute expiration time equal to 1 second.

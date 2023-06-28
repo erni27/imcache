@@ -7,9 +7,9 @@ import (
 
 func TestEntry_HasExpired(t *testing.T) {
 	tests := []struct {
+		now   time.Time
 		name  string
 		entry entry[string, string]
-		now   time.Time
 		want  bool
 	}{
 		{
@@ -132,12 +132,12 @@ func TestEntry_HasSlidingExpiration(t *testing.T) {
 func TestEntry_SetDefault(t *testing.T) {
 	now := time.Now()
 	tests := []struct {
+		now     time.Time
 		name    string
 		entry   entry[string, string]
-		now     time.Time
+		want    entry[string, string]
 		d       time.Duration
 		sliding bool
-		want    entry[string, string]
 	}{
 		{
 			name:  "no expiration",

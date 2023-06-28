@@ -15,7 +15,7 @@ import (
 
 // New returns a new Cache instance.
 //
-// By default a returned Cache has no default expiration, no default sliding
+// By default, a returned Cache has no default expiration, no default sliding
 // expiration, no entry limit and no eviction callback.
 //
 // Option(s) can be used to customize the returned Cache.
@@ -52,7 +52,7 @@ func newCache[K comparable, V any](opts options[K, V]) *Cache[K, V] {
 
 // Cache is a non-sharded in-memory cache.
 //
-// By default it has no default expiration, no default sliding expiration
+// By default, it has no default expiration, no default sliding expiration
 // no entry limit and no eviction callback.
 //
 // The zero value Cache is ready to use.
@@ -69,29 +69,24 @@ func newCache[K comparable, V any](opts options[K, V]) *Cache[K, V] {
 //		imcache.WithEvictionCallbackOption[string, interface{}](LogEvictedEntry),
 //	)
 type Cache[K comparable, V any] struct {
-	mu sync.Mutex
-	m  map[K]entry[K, V]
-
-	defaultExp time.Duration
-	sliding    bool
-
-	onEviction EvictionCallback[K, V]
-
 	queue           evictionq[K]
+	m               map[K]entry[K, V]
+	onEviction      EvictionCallback[K, V]
+	cleaner         *cleaner
+	defaultExp      time.Duration
 	maxEntriesLimit int
-
-	cleaner *cleaner
-
-	closed bool
+	mu              sync.Mutex
+	sliding         bool
+	closed          bool
 }
 
 // init initializes the Cache.
 // It is not a concurrency-safe method.
-func (s *Cache[K, V]) init() {
-	if s.m == nil {
-		s.m = make(map[K]entry[K, V])
-		s.defaultExp = noExp
-		s.queue = &nopq[K]{}
+func (c *Cache[K, V]) init() {
+	if c.m == nil {
+		c.m = make(map[K]entry[K, V])
+		c.defaultExp = noExp
+		c.queue = &nopq[K]{}
 	}
 }
 
@@ -612,7 +607,7 @@ func (c *Cache[K, V]) Close() {
 // NewSharded returns a new Sharded instance.
 // It panics if n is not greater than 0 or hasher is nil.
 //
-// By default a returned Sharded has no default expiration,
+// By default, a returned Sharded has no default expiration,
 // no default sliding expiration, no entry limit and
 // no eviction callback.
 //
@@ -658,7 +653,7 @@ func NewSharded[K comparable, V any](n int, hasher Hasher64[K], opts ...Option[K
 //
 // Each shard is a separate Cache instance.
 //
-// By default it has no default expiration, no default sliding expiration
+// By default, it has no default expiration, no default sliding expiration
 // no entry limit and no eviction callback.
 //
 // The zero value Sharded is NOT ready to use.
@@ -673,11 +668,10 @@ func NewSharded[K comparable, V any](n int, hasher Hasher64[K], opts ...Option[K
 //		imcache.WithEvictionCallbackOption[string, interface{}](LogEvictedEntry),
 //	)
 type Sharded[K comparable, V any] struct {
-	shards []*Cache[K, V]
-	hasher Hasher64[K]
-	mask   uint64
-
+	hasher  Hasher64[K]
 	cleaner *cleaner
+	shards  []*Cache[K, V]
+	mask    uint64
 }
 
 // shard returns the shard for the given key.
@@ -794,7 +788,7 @@ func (s *Sharded[K, V]) ReplaceKey(old, new K, exp Expiration) (present bool) {
 	if newShard.maxEntriesLimit <= 0 || newShard.len() <= newShard.maxEntriesLimit {
 		oldShard.mu.Unlock()
 		newShard.mu.Unlock()
-		// Both callbacks points to the same function.
+		// Both callbacks point to the same function.
 		if newShard.onEviction != nil {
 			go func() {
 				newShard.onEviction(old, oldShardEntry.val, EvictionReasonKeyReplaced)
