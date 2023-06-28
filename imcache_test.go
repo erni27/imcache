@@ -12,7 +12,7 @@ import (
 )
 
 func init() {
-	rand.Seed(time.Now().UnixNano())
+	rand.NewSource(time.Now().UnixNano())
 }
 
 type imcache[K comparable, V any] interface {
@@ -35,8 +35,8 @@ type imcache[K comparable, V any] interface {
 // If a test needs different type of cache or configured one, it should be
 // created within the test.
 var caches = []struct {
-	name   string
 	create func() imcache[string, string]
+	name   string
 }{
 	{
 		name: "Cache",
@@ -379,9 +379,9 @@ func TestImcache_Replace(t *testing.T) {
 }
 
 func TestImcache_ReplaceWithFunc(t *testing.T) {
-	var caches = []struct {
-		name   string
+	caches := []struct {
 		create func() imcache[string, int32]
+		name   string
 	}{
 		{
 			name:   "Cache",
@@ -393,10 +393,10 @@ func TestImcache_ReplaceWithFunc(t *testing.T) {
 		},
 	}
 	tests := []struct {
-		name    string
 		setup   func(imcache[string, int32])
-		key     string
 		f       func(int32) int32
+		name    string
+		key     string
 		val     int32
 		present bool
 	}{
@@ -445,12 +445,12 @@ func TestImcache_ReplaceWithFunc(t *testing.T) {
 
 func TestImcache_ReplaceKey(t *testing.T) {
 	tests := []struct {
-		name  string
 		setup func(imcache[string, string])
+		name  string
 		old   string
 		new   string
-		want  bool
 		val   string
+		want  bool
 	}{
 		{
 			name: "success",
@@ -672,8 +672,8 @@ func TestImcache_Len(t *testing.T) {
 
 func TestImcache_DefaultExpiration(t *testing.T) {
 	caches := []struct {
-		name   string
 		create func() imcache[string, string]
+		name   string
 	}{
 		{
 			name: "Cache",
@@ -709,8 +709,8 @@ func TestCache_DefaultExpiration_LessOrEqual0(t *testing.T) {
 
 func TestImcache_DefaultSlidingExpiration(t *testing.T) {
 	caches := []struct {
-		name   string
 		create func() imcache[string, string]
+		name   string
 	}{
 		{
 			name: "Cache",
@@ -756,14 +756,14 @@ func TestCache_DefaultSlidingExpiration_LessOrEqual0(t *testing.T) {
 }
 
 type evictionCallbackCall struct {
-	key    string
 	val    interface{}
+	key    string
 	reason EvictionReason
 }
 
 type evictionCallbackMock struct {
-	mu    sync.Mutex
 	calls []evictionCallbackCall
+	mu    sync.Mutex
 }
 
 func (m *evictionCallbackMock) Callback(key string, val interface{}, reason EvictionReason) {
@@ -828,8 +828,8 @@ func (m *evictionCallbackMock) Reset() {
 func TestImcache_Cleaner(t *testing.T) {
 	evictioncMock := &evictionCallbackMock{}
 	caches := []struct {
-		name   string
 		create func() imcache[string, interface{}]
+		name   string
 	}{
 		{
 			name: "Cache",
@@ -864,8 +864,8 @@ func TestImcache_Cleaner(t *testing.T) {
 func TestImcache_Cleaner_IntervalLessOrEqual0(t *testing.T) {
 	evictioncMock := &evictionCallbackMock{}
 	caches := []struct {
-		name   string
 		create func() imcache[string, interface{}]
+		name   string
 	}{
 		{
 			name: "Cache",
@@ -895,8 +895,8 @@ func TestImcache_Cleaner_IntervalLessOrEqual0(t *testing.T) {
 
 func TestImcache_Close(t *testing.T) {
 	caches := []struct {
-		name   string
 		create func() imcache[string, string]
+		name   string
 	}{
 		{
 			name: "Cache",
@@ -959,8 +959,8 @@ func TestImcache_Close(t *testing.T) {
 // If a test needs different type of cache or one with more sophisticated
 // configuration, it should be created within the test.
 var cachesWithEvictionCallback = []struct {
-	name   string
 	create func(EvictionCallback[string, interface{}]) imcache[string, interface{}]
+	name   string
 }{
 	{
 		name: "Cache",
@@ -1496,8 +1496,8 @@ func (c *longRunningEvictionCallback) Callback(key, value string, reason Evictio
 
 func TestImcache_LongRunning_EvictionCallback(t *testing.T) {
 	tests := []struct {
-		name    string
 		execute func(imcache[string, string])
+		name    string
 	}{
 		{
 			name: "Get evict expired entry",
@@ -1657,8 +1657,8 @@ func TestImcache_LongRunning_EvictionCallback(t *testing.T) {
 		},
 	}
 	caches := []struct {
-		name   string
 		create func(EvictionCallback[string, string]) imcache[string, string]
+		name   string
 	}{
 		{
 			name: "Cache",

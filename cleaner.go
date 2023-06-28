@@ -19,10 +19,10 @@ func newCleaner() *cleaner {
 }
 
 type cleaner struct {
-	mu      sync.Mutex
-	running bool
 	stopCh  chan struct{}
 	doneCh  chan struct{}
+	mu      sync.Mutex
+	running bool
 }
 
 func (c *cleaner) start(r eremover, interval time.Duration) error {
