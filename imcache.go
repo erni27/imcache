@@ -343,6 +343,33 @@ func (c *Cache[K, V]) Replace(key K, val V, exp Expiration) (present bool) {
 	return true
 }
 
+// Number is a constraint that permits any numeric type except complex ones.
+//
+// Deprecated: Number constraint is deprecated. It is easy to write your own
+// constraint. imcache's goal is to be simple. Creating artifical types
+// or functions that are not even needed conflicts with this goal.
+type Number interface {
+	~float32 | ~float64 | ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr | ~int | ~int8 | ~int16 | ~int32 | ~int64
+}
+
+// Increment increments the given number by one.
+//
+// Deprecated: Increment function is deprecated. It is easy to write your own
+// function. imcache's goal is to be simple. Creating artifical types
+// or functions that are not even needed conflicts with this goal.
+func Increment[V Number](old V) V {
+	return old + 1
+}
+
+// Decrement decrements the given number by one.
+//
+// Deprecated: Decrement function is deprecated. It is easy to write your own
+// function. imcache's goal is to be simple. Creating artifical types
+// or functions that are not even needed conflicts with this goal.
+func Decrement[V Number](old V) V {
+	return old - 1
+}
+
 // ReplaceWithFunc replaces the value for the given key with the result
 // of the given function that takes the current value as an argument.
 // It returns true if the value is present and replaced, otherwise it returns
@@ -353,14 +380,15 @@ func (c *Cache[K, V]) Replace(key K, val V, exp Expiration) (present bool) {
 // If you want to replace the value with a new value not depending on
 // the current value, use the Replace method instead.
 //
-// imcache provides the Increment and Decrement functions that can be used as f
-// to increment or decrement the current numeric type value.
-//
-// Example:
+// Example showing how to increment the value by 1 using ReplaceWithFunc:
 //
 //	var c imcache.Cache[string, int32]
 //	c.Set("foo", 997, imcache.WithNoExpiration())
-//	_ = c.ReplaceWithFunc("foo", imcache.Increment[int32], imcache.WithNoExpiration())
+//	_ = c.ReplaceWithFunc(
+//		"foo",
+//		func(current int32) int32 { return current + 1 },
+//		imcache.WithNoExpiration(),
+//	)
 func (c *Cache[K, V]) ReplaceWithFunc(key K, f func(current V) (new V), exp Expiration) (present bool) {
 	now := time.Now()
 	c.mu.Lock()
@@ -447,6 +475,50 @@ func (c *Cache[K, V]) ReplaceKey(old, new K, exp Expiration) (present bool) {
 		}()
 	}
 	return true
+}
+
+// CompareAndSwap replaces the value for the given key if the current value
+// is equal to the expected value.
+//
+// Equality is defined by the given compare function.
+//
+// If it encounters an expired entry, the expired entry is evicted.
+func (c *Cache[K, V]) CompareAndSwap(key K, expected, new V, compare func(V, V) bool, exp Expiration) (swapped, present bool) {
+	now := time.Now()
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return false, false
+	}
+	currentEntry, ok := c.m[key]
+	if !ok {
+		c.mu.Unlock()
+		return false, false
+	}
+	c.queue.Remove(currentEntry.node)
+	if currentEntry.HasExpired(now) {
+		delete(c.m, key)
+		c.mu.Unlock()
+		if c.onEviction != nil {
+			go c.onEviction(key, currentEntry.val, EvictionReasonExpired)
+		}
+		return false, false
+	}
+	if !compare(currentEntry.val, expected) {
+		c.queue.Add(currentEntry.node)
+		c.mu.Unlock()
+		return false, true
+	}
+	newEntry := entry[K, V]{val: new, node: currentEntry.node}
+	exp.apply(&newEntry.exp)
+	newEntry.SetDefaultOrNothing(now, c.defaultExp, c.sliding)
+	c.queue.Add(newEntry.node)
+	c.m[key] = newEntry
+	c.mu.Unlock()
+	if c.onEviction != nil {
+		go c.onEviction(key, currentEntry.val, EvictionReasonReplaced)
+	}
+	return true, true
 }
 
 // Remove removes the cache entry for the given key.
@@ -920,6 +992,16 @@ func (s *Sharded[K, V]) ReplaceKey(old, new K, exp Expiration) (present bool) {
 		}
 	}()
 	return true
+}
+
+// CompareAndSwap replaces the value for the given key if the current value
+// is equal to the expected value.
+//
+// Equality is defined by the given compare function.
+//
+// If it encounters an expired entry, the expired entry is evicted.
+func (s *Sharded[K, V]) CompareAndSwap(key K, expected, new V, compare func(V, V) bool, exp Expiration) (swapped, present bool) {
+	return s.shard(key).CompareAndSwap(key, expected, new, compare, exp)
 }
 
 // Remove removes the cache entry for the given key.
