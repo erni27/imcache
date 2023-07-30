@@ -478,8 +478,7 @@ func (c *Cache[K, V]) ReplaceKey(old, new K, exp Expiration) (present bool) {
 }
 
 // CompareAndSwap replaces the value for the given key if the current value
-// is equal to the expected value. It returns true if the value is present
-// and replaced, otherwise it returns false.
+// is equal to the expected value.
 //
 // Equality is defined by the given compare function.
 //
@@ -996,8 +995,7 @@ func (s *Sharded[K, V]) ReplaceKey(old, new K, exp Expiration) (present bool) {
 }
 
 // CompareAndSwap replaces the value for the given key if the current value
-// is equal to the expected value. It returns true if the value is present
-// and replaced, otherwise it returns false.
+// is equal to the expected value.
 //
 // Equality is defined by the given compare function.
 //
