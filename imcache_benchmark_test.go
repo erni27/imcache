@@ -2,15 +2,9 @@ package imcache
 
 import (
 	"fmt"
-	"math/rand"
 	"sync"
 	"testing"
-	"time"
 )
-
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
 
 type token struct {
 	ID int `json:"id"`
@@ -25,7 +19,7 @@ func BenchmarkCache_Get(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if v, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); ok {
+		if v, ok := c.Get(fmt.Sprintf("key-%d", random.Intn(b.N))); ok {
 			_ = v
 		}
 	}
@@ -42,7 +36,7 @@ func BenchmarkSharded_Get(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				if v, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); ok {
+				if v, ok := c.Get(fmt.Sprintf("key-%d", random.Intn(b.N))); ok {
 					_ = v
 				}
 			}
@@ -59,7 +53,7 @@ func BenchmarkCache_Get_MaxEntriesLimit(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if v, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); ok {
+		if v, ok := c.Get(fmt.Sprintf("key-%d", random.Intn(b.N))); ok {
 			_ = v
 		}
 	}
@@ -76,7 +70,7 @@ func BenchmarkSharded_Get_MaxEntriesLimit(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				if v, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); ok {
+				if v, ok := c.Get(fmt.Sprintf("key-%d", random.Intn(b.N))); ok {
 					_ = v
 				}
 			}
@@ -95,7 +89,7 @@ func BenchmarkMap_Get(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		mu.Lock()
-		v, ok := m[fmt.Sprintf("key-%d", rand.Intn(b.N))]
+		v, ok := m[fmt.Sprintf("key-%d", random.Intn(b.N))]
 		if ok {
 			_ = (token)(v)
 		}
@@ -113,7 +107,7 @@ func BenchmarkCache_Get_Parallel(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			if v, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); ok {
+			if v, ok := c.Get(fmt.Sprintf("key-%d", random.Intn(b.N))); ok {
 				_ = (token)(v)
 			}
 		}
@@ -132,7 +126,7 @@ func BenchmarkSharded_Get_Parallel(b *testing.B) {
 			b.ResetTimer()
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
-					if v, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); ok {
+					if v, ok := c.Get(fmt.Sprintf("key-%d", random.Intn(b.N))); ok {
 						_ = (token)(v)
 					}
 				}
@@ -151,7 +145,7 @@ func BenchmarkCache_Get_MaxEntriesLimit_Parallel(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			if v, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); ok {
+			if v, ok := c.Get(fmt.Sprintf("key-%d", random.Intn(b.N))); ok {
 				_ = (token)(v)
 			}
 		}
@@ -170,7 +164,7 @@ func BenchmarkSharded_Get_MaxEntriesLimit_Parallel(b *testing.B) {
 			b.ResetTimer()
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
-					if v, ok := c.Get(fmt.Sprintf("key-%d", rand.Intn(b.N))); ok {
+					if v, ok := c.Get(fmt.Sprintf("key-%d", random.Intn(b.N))); ok {
 						_ = (token)(v)
 					}
 				}
@@ -191,7 +185,7 @@ func BenchmarkMap_Get_Parallel(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			mu.Lock()
-			v, ok := m[fmt.Sprintf("key-%d", rand.Intn(b.N))]
+			v, ok := m[fmt.Sprintf("key-%d", random.Intn(b.N))]
 			if ok {
 				_ = (token)(v)
 			}
@@ -206,7 +200,7 @@ func BenchmarkCache_Set(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		c.Set(fmt.Sprintf("key-%d", rand.Intn(b.N)), token{ID: i}, WithNoExpiration())
+		c.Set(fmt.Sprintf("key-%d", random.Intn(b.N)), token{ID: i}, WithNoExpiration())
 	}
 }
 
@@ -218,7 +212,7 @@ func BenchmarkSharded_Set(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				c.Set(fmt.Sprintf("key-%d", rand.Intn(b.N)), token{ID: i}, WithNoExpiration())
+				c.Set(fmt.Sprintf("key-%d", random.Intn(b.N)), token{ID: i}, WithNoExpiration())
 			}
 		})
 	}
@@ -230,7 +224,7 @@ func BenchmarkCache_Set_MaxEntriesLimit(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		c.Set(fmt.Sprintf("key-%d", rand.Intn(b.N)), token{ID: i}, WithNoExpiration())
+		c.Set(fmt.Sprintf("key-%d", random.Intn(b.N)), token{ID: i}, WithNoExpiration())
 	}
 }
 
@@ -242,7 +236,7 @@ func BenchmarkSharded_Set_MaxEntriesLimit(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				c.Set(fmt.Sprintf("key-%d", rand.Intn(b.N)), token{ID: i}, WithNoExpiration())
+				c.Set(fmt.Sprintf("key-%d", random.Intn(b.N)), token{ID: i}, WithNoExpiration())
 			}
 		})
 	}
@@ -256,7 +250,7 @@ func BenchmarkMap_Set(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		mu.Lock()
-		m[fmt.Sprintf("key-%d", rand.Intn(b.N))] = token{ID: i}
+		m[fmt.Sprintf("key-%d", random.Intn(b.N))] = token{ID: i}
 		mu.Unlock()
 	}
 }
@@ -268,7 +262,7 @@ func BenchmarkCache_Set_Parallel(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			i := rand.Intn(b.N)
+			i := random.Intn(b.N)
 			c.Set(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
 		}
 	})
@@ -283,7 +277,7 @@ func BenchmarkSharded_Set_Parallel(b *testing.B) {
 			b.ResetTimer()
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
-					i := rand.Intn(b.N)
+					i := random.Intn(b.N)
 					c.Set(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
 				}
 			})
@@ -298,7 +292,7 @@ func BenchmarkCache_Set_MaxEntriesLimit_Parallel(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			i := rand.Intn(b.N)
+			i := random.Intn(b.N)
 			c.Set(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
 		}
 	})
@@ -313,7 +307,7 @@ func BenchmarkSharded_Set_MaxEntriesLimit_Parallel(b *testing.B) {
 			b.ResetTimer()
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
-					i := rand.Intn(b.N)
+					i := random.Intn(b.N)
 					c.Set(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
 				}
 			})
@@ -329,7 +323,7 @@ func BenchmarkMap_Set_Parallel(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			i := rand.Intn(b.N)
+			i := random.Intn(b.N)
 			mu.Lock()
 			m[fmt.Sprintf("key-%d", i)] = token{ID: i}
 			mu.Unlock()
@@ -343,7 +337,7 @@ func BenchmarkCache_GetOrSet(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		i := rand.Intn(b.N)
+		i := random.Intn(b.N)
 		v, ok := c.GetOrSet(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
 		if ok {
 			_ = (token)(v)
@@ -359,7 +353,7 @@ func BenchmarkSharded_GetOrSet(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				i := rand.Intn(b.N)
+				i := random.Intn(b.N)
 				v, ok := c.GetOrSet(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
 				if ok {
 					_ = (token)(v)
@@ -376,7 +370,7 @@ func BenchmarkCache_GetOrSet_Parallel(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			i := rand.Intn(b.N)
+			i := random.Intn(b.N)
 			v, ok := c.GetOrSet(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
 			if ok {
 				_ = (token)(v)
@@ -394,7 +388,7 @@ func Benchmark_Sharded_GetOrSet_Parallel(b *testing.B) {
 			b.ResetTimer()
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
-					i := rand.Intn(b.N)
+					i := random.Intn(b.N)
 					v, ok := c.GetOrSet(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
 					if ok {
 						_ = (token)(v)
@@ -414,7 +408,7 @@ func BenchmarkCache_Replace(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		i := rand.Intn(b.N)
+		i := random.Intn(b.N)
 		if ok := c.Replace(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration()); !ok {
 			b.Fatalf("Replace(_, _, _) = %t", ok)
 		}

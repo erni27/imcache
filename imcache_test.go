@@ -11,9 +11,7 @@ import (
 	"time"
 )
 
-func init() {
-	rand.NewSource(time.Now().UnixNano())
-}
+var random = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 type imcache[K comparable, V any] interface {
 	Get(key K) (v V, present bool)
@@ -23,6 +21,7 @@ type imcache[K comparable, V any] interface {
 	Replace(key K, val V, exp Expiration) (present bool)
 	ReplaceWithFunc(key K, f func(old V) (new V), exp Expiration) (present bool)
 	ReplaceKey(oldKey, newKey K, exp Expiration) (present bool)
+	CompareAndSwap(key K, expected, new V, compare func(V, V) bool, exp Expiration) (swapped, present bool)
 	Remove(key K) (present bool)
 	RemoveAll()
 	RemoveExpired()
@@ -42,7 +41,7 @@ var caches = []struct {
 		name: "Cache",
 		create: func() imcache[string, string] {
 			// Randomly test both zero value and initialized Cache.
-			if rand.Intn(2) == 1 {
+			if random.Intn(2) == 1 {
 				return New[string, string]()
 			}
 			return &Cache[string, string]{}
@@ -52,7 +51,7 @@ var caches = []struct {
 		name: "Sharded",
 		create: func() imcache[string, string] {
 			// Randomly test different number of shards.
-			shards := rand.Intn(10) + 1
+			shards := random.Intn(10) + 1
 			return NewSharded[string, string](shards, DefaultStringHasher64{})
 		},
 	},
@@ -379,6 +378,9 @@ func TestImcache_Replace(t *testing.T) {
 }
 
 func TestImcache_ReplaceWithFunc(t *testing.T) {
+	increment := func(old int32) int32 {
+		return old + 1
+	}
 	caches := []struct {
 		create func() imcache[string, int32]
 		name   string
@@ -406,7 +408,7 @@ func TestImcache_ReplaceWithFunc(t *testing.T) {
 				c.Set("foo", 997, WithNoExpiration())
 			},
 			key:     "foo",
-			f:       Increment[int32],
+			f:       increment,
 			val:     998,
 			present: true,
 		},
@@ -417,13 +419,13 @@ func TestImcache_ReplaceWithFunc(t *testing.T) {
 				<-time.After(time.Nanosecond)
 			},
 			key: "foo",
-			f:   Increment[int32],
+			f:   increment,
 		},
 		{
 			name:  "entry doesn't exist",
 			setup: func(c imcache[string, int32]) {},
 			key:   "foo",
-			f:     Increment[int32],
+			f:     increment,
 		},
 	}
 	for _, cache := range caches {
@@ -505,6 +507,80 @@ func TestImcache_ReplaceKey(t *testing.T) {
 				}
 				if got, ok := c.Get(tt.new); !ok || got != tt.val {
 					t.Errorf("imcache.Get(%s) = %v, %t, want %v, %t", tt.new, got, ok, tt.val, true)
+				}
+			})
+		}
+	}
+}
+
+func TestImcache_CompareAndSwap(t *testing.T) {
+	tests := []struct {
+		setup    func(imcache[string, string])
+		name     string
+		key      string
+		expected string
+		new      string
+		compare  func(string, string) bool
+		swapped  bool
+		present  bool
+	}{
+		{
+			name: "swapped",
+			setup: func(c imcache[string, string]) {
+				c.Set("foo", "foo", WithNoExpiration())
+			},
+			key:      "foo",
+			expected: "foo",
+			new:      "bar",
+			compare:  func(x, y string) bool { return x == y },
+			swapped:  true,
+			present:  true,
+		},
+		{
+			name: "not swapped",
+			setup: func(c imcache[string, string]) {
+				c.Set("foo", "foo", WithNoExpiration())
+			},
+			key:      "foo",
+			expected: "foo",
+			new:      "bar",
+			compare:  func(_, _ string) bool { return false },
+			present:  true,
+		},
+		{
+			name:     "key doesn't exist",
+			setup:    func(_ imcache[string, string]) {},
+			key:      "foo",
+			expected: "foo",
+			new:      "bar",
+			compare:  func(_, _ string) bool { return true },
+		},
+		{
+			name: "entry expired",
+			setup: func(c imcache[string, string]) {
+				c.Set("foo", "foo", WithExpiration(time.Nanosecond))
+				<-time.After(time.Nanosecond)
+			},
+			key:      "foo",
+			expected: "foo",
+			new:      "bar",
+			compare:  func(_, _ string) bool { return true },
+		},
+	}
+	for _, cache := range caches {
+		for _, tt := range tests {
+			t.Run(cache.name+" "+tt.name, func(t *testing.T) {
+				c := cache.create()
+				tt.setup(c)
+				if swapped, present := c.CompareAndSwap(tt.key, tt.expected, tt.new, tt.compare, WithNoExpiration()); swapped != tt.swapped || present != tt.present {
+					t.Errorf("imcache.CompareAndSwap(%s, %s, %s, _, _) = %t, %t, want %t, %t", tt.key, tt.expected, tt.new, swapped, present, tt.swapped, tt.present)
+				}
+				if !tt.swapped {
+					return
+				}
+				val, ok := c.Get(tt.key)
+				if !ok || val != tt.new {
+					t.Errorf("imcache.Get(%s) = %s, %t, want %s, %t", tt.key, val, ok, tt.new, true)
 				}
 			})
 		}
@@ -659,7 +735,7 @@ func TestImcache_Len(t *testing.T) {
 	for _, cache := range caches {
 		t.Run(cache.name, func(t *testing.T) {
 			c := cache.create()
-			n := 1000 + rand.Intn(1000)
+			n := 1000 + random.Intn(1000)
 			for i := 0; i < n; i++ {
 				c.Set(strconv.Itoa(i), fmt.Sprintf("test-%d", i), WithNoExpiration())
 			}
@@ -938,6 +1014,9 @@ func TestImcache_Close(t *testing.T) {
 			if ok := c.ReplaceKey("foo", "bar", WithNoExpiration()); ok {
 				t.Error("imcache.ReplaceKey(_, _, _) = true, want false", ok)
 			}
+			if swapped, present := c.CompareAndSwap("foo", "bar", "foobar", func(_, _ string) bool { return true }, WithNoExpiration()); present || swapped {
+				t.Errorf("imcache.CompareAndSwap(_, _, _, _, _) = %t, %t, want false, false", swapped, present)
+			}
 			if ok := c.Remove("foo"); ok {
 				t.Error("imcache.Remove(_) = true, want false")
 			}
@@ -1090,6 +1169,27 @@ func TestImcache_ReplaceWithFunc_EvictionCallback(t *testing.T) {
 			evictioncMock.HasEventuallyBeenCalledWith(t, "foo", 1, EvictionReasonExpired)
 			if ok := c.ReplaceWithFunc("bar", func(interface{}) interface{} { return 997 }, WithNoExpiration()); !ok {
 				t.Errorf("imcache.Replace(%s, _, _) = %t, want true", "bar", ok)
+			}
+			evictioncMock.HasEventuallyBeenCalledWith(t, "bar", 2, EvictionReasonReplaced)
+		})
+	}
+}
+
+func TestImcache_CompareAndSwap_EvictionCallback(t *testing.T) {
+	evictioncMock := &evictionCallbackMock{}
+	for _, cache := range cachesWithEvictionCallback {
+		t.Run(cache.name, func(t *testing.T) {
+			defer evictioncMock.Reset()
+			c := cache.create(evictioncMock.Callback)
+			c.Set("foo", 1, WithExpiration(time.Nanosecond))
+			c.Set("bar", 2, WithNoExpiration())
+			<-time.After(time.Nanosecond)
+			if swapped, present := c.CompareAndSwap("foo", 1, 997, func(_, _ interface{}) bool { return true }, WithNoExpiration()); swapped || present {
+				t.Errorf("imcache.CompareAndSwap(%s, _, _, _, _) = %t, %t, want false, false", "foo", swapped, present)
+			}
+			evictioncMock.HasEventuallyBeenCalledWith(t, "foo", 1, EvictionReasonExpired)
+			if swapped, present := c.CompareAndSwap("bar", 2, 997, func(_, _ interface{}) bool { return true }, WithNoExpiration()); !swapped || !present {
+				t.Errorf("imcache.CompareAndSwap(%s, _, _, _, _) = %t, %t want true, true", "bar", swapped, present)
 			}
 			evictioncMock.HasEventuallyBeenCalledWith(t, "bar", 2, EvictionReasonReplaced)
 		})
@@ -1406,6 +1506,28 @@ func TestCache_MaxEntriesLimit(t *testing.T) {
 		t.Error("Cache.Get(_) = _, true, got _, false")
 	}
 	evictioncMock.HasEventuallyBeenCalledWith(t, "twenty", 20, EvictionReasonMaxEntriesExceeded)
+	// CompareAndSwap should move the entry to the front of the LRU queue if swapped.
+	if swapped, present := c.CompareAndSwap("twentythree", 23, 2323, func(_, _ interface{}) bool { return true }, WithNoExpiration()); !present || !swapped {
+		t.Errorf("Cache.CompareAndSwap(_, _, _, _, _) = %t, %t, want _, _, true, true", swapped, present)
+	}
+	// LRU queue: twentythree -> twentyfive -> twentytwo -> eighteen -> twentyfour.
+	c.Set("twentysix", 26, WithNoExpiration())
+	// LRU queue: twentysix -> twentythree -> twentyfive -> twentytwo -> eighteen.
+	if _, ok := c.Get("twentyfour"); ok {
+		t.Error("Cache.Get(_) = _, true, got _, false")
+	}
+	evictioncMock.HasEventuallyBeenCalledWith(t, "twentyfour", 24, EvictionReasonMaxEntriesExceeded)
+	// CompareAndSwap should not move the entry to the front of the LRU queue if not swapped.
+	if swapped, present := c.CompareAndSwap("eighteen", 18, 1818, func(_, _ interface{}) bool { return false }, WithNoExpiration()); swapped || !present {
+		t.Errorf("Cache.CompareAndSwap(_, _, _, _, _) = %t, %t, want _, _, false, true", swapped, present)
+	}
+	// LRU queue: eighteen -> twentysix -> twentythree -> twentyfive -> twentytwo.
+	c.Set("twentyseven", 27, WithNoExpiration())
+	// LRU queue: twentyseven -> eighteen -> twentysix -> twentythree -> twentyfive.
+	if _, ok := c.Get("twentytwo"); ok {
+		t.Error("Cache.Get(_) = _, true, got _, false")
+	}
+	evictioncMock.HasEventuallyBeenCalledWith(t, "twentytwo", 22, EvictionReasonMaxEntriesExceeded)
 }
 
 func TestSharded_ReplaceKey_MaxEntriesLimit(t *testing.T) {
@@ -1615,6 +1737,20 @@ func TestImcache_LongRunning_EvictionCallback(t *testing.T) {
 			execute: func(c imcache[string, string]) {
 				c.Set("bar", "foo", WithNoExpiration())
 				c.ReplaceKey("bar", "foo", WithNoExpiration())
+			},
+		},
+		{
+			name: "CompareAndSwap evict expired entry",
+			execute: func(c imcache[string, string]) {
+				c.Set("foo", "bar", WithExpirationDate(time.Now().Add(-1*time.Second)))
+				c.CompareAndSwap("foo", "bar", "foo", func(_, _ string) bool { return true }, WithNoExpiration())
+			},
+		},
+		{
+			name: "CompareAndSwap evict replaced entry",
+			execute: func(c imcache[string, string]) {
+				c.Set("foo", "bar", WithNoExpiration())
+				c.CompareAndSwap("foo", "bar", "foo", func(_, _ string) bool { return true }, WithNoExpiration())
 			},
 		},
 		{
