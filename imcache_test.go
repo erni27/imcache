@@ -1853,3 +1853,46 @@ func TestSharded_ReplaceKey_LongRunning_EvictionCallback_MaxEntriesLimit(t *test
 		t.Error("ReplaceKey should not block on a long running eviction callback")
 	}
 }
+
+func TestEntry_expired(t *testing.T) {
+	tests := []struct {
+		now   time.Time
+		name  string
+		entry entry[string, string]
+		want  bool
+	}{
+		{
+			name:  "no expiration",
+			entry: entry[string, string]{val: "foo", exp: expiration{date: noExp}},
+			now:   time.Now(),
+		},
+		{
+			name:  "expired",
+			entry: entry[string, string]{val: "foo", exp: expiration{date: time.Now().Add(-time.Second).UnixNano()}},
+			now:   time.Now(),
+			want:  true,
+		},
+		{
+			name:  "not expired",
+			entry: entry[string, string]{val: "foo", exp: expiration{date: time.Now().Add(time.Second).UnixNano()}},
+			now:   time.Now(),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.entry.expired(tt.now); got != tt.want {
+				t.Errorf("entry.expired() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEntry_slide(t *testing.T) {
+	entry := entry[string, string]{val: "foo", exp: expiration{date: time.Now().Add(5 * time.Second).UnixNano(), sliding: 5 * time.Second}}
+	<-time.After(2 * time.Second)
+	now := time.Now()
+	entry.slide(now)
+	if want := now.Add(5 * time.Second).UnixNano(); entry.exp.date != want {
+		t.Errorf("entry.slide() results in expiration %v, want %v", entry.exp.date, want)
+	}
+}
