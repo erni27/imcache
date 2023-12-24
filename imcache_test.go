@@ -1603,7 +1603,7 @@ func TestCache_MaxEntriesLimit_NoEvictionCallback(t *testing.T) {
 
 func TestCache_MaxEntriesLimit_LessOrEqual0(t *testing.T) {
 	c := New(WithMaxEntriesOption[string, string](0))
-	if _, ok := c.queue.(*nopq[string]); !ok {
+	if _, ok := c.queue.(*nopEvictionQueue[string, string]); !ok {
 		t.Error("Cache.queue = _, want *nopq")
 	}
 }

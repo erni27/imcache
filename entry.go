@@ -4,9 +4,9 @@ import "time"
 
 // entry is the value stored in the cache.
 type entry[K comparable, V any] struct {
-	val  V
-	node *node[K]
-	exp  expiration
+	key K
+	val V
+	exp expiration
 }
 
 // HasExpired returns true if the entry has expired.
