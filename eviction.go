@@ -67,6 +67,16 @@ type evictionQueue[K comparable, V any] interface {
 	// touch updates the node position in the eviction queue
 	// according to the eviction policy.
 	touch(node[K, V])
+	// touchall updates the node position in the eviction queue
+	// according to the eviction policy.
+	// It updates the node position in the context of GetAll operation.
+	//
+	// It simplifies preserving the eviction policy when the GetAll
+	// operation is used. Some eviction policies (e.g. LRU) may
+	// require to not update the node position in the eviction queue
+	// when the GetAll operation is used while other eviction policies
+	// (e.g. TTL) may require the update.
+	touchall(node[K, V])
 }
 
 //lint:ignore U1000 false positive
@@ -141,6 +151,8 @@ func (q *lruEvictionQueue[K, V]) touch(n node[K, V]) {
 	q.head = lrun
 }
 
+func (q *lruEvictionQueue[K, V]) touchall(n node[K, V]) {}
+
 //lint:ignore U1000 false positive
 type nopNode[K comparable, V any] entry[K, V]
 
@@ -167,3 +179,5 @@ func (nopEvictionQueue[K, V]) pop() node[K, V] {
 }
 
 func (nopEvictionQueue[K, V]) touch(node[K, V]) {}
+
+func (nopEvictionQueue[K, V]) touchall(node[K, V]) {}

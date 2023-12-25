@@ -659,7 +659,7 @@ func (c *Cache[K, V]) getAll(now time.Time) map[K]V {
 		}
 		entry.slide(now)
 		node.setEntry(entry)
-		c.queue.touch(node)
+		c.queue.touchall(node)
 		got[key] = entry.val
 	}
 	c.mu.Unlock()
