@@ -250,28 +250,8 @@ func (c *Cache[K, V]) GetOrSet(key K, val V, exp Expiration) (value V, present b
 	// Make sure that the shard is initialized.
 	c.init()
 	currentNode, ok := c.m[key]
-	if !ok {
-		c.m[key] = c.queue.add(entry[K, V]{key: key, val: val, exp: exp.new(now, c.defaultExp, c.sliding)})
-		if c.maxEntriesLimit <= 0 || c.len() <= c.maxEntriesLimit {
-			c.mu.Unlock()
-			return val, false
-		}
-		evictedNode := c.queue.pop()
-		evictedEntry := evictedNode.entry()
-		delete(c.m, evictedEntry.key)
-		c.mu.Unlock()
-		if c.onEviction == nil {
-			return val, false
-		}
-		if evictedEntry.expired(now) {
-			go c.onEviction(evictedEntry.key, evictedEntry.val, EvictionReasonExpired)
-		} else {
-			go c.onEviction(evictedEntry.key, evictedEntry.val, EvictionReasonMaxEntriesExceeded)
-		}
-		return val, false
-	}
-	currentEntry := currentNode.entry()
-	if !currentEntry.expired(now) {
+	if ok && !currentNode.entry().expired(now) {
+		currentEntry := currentNode.entry()
 		currentEntry.slide(now)
 		currentNode.setEntry(currentEntry)
 		c.queue.touch(currentNode)
@@ -279,10 +259,30 @@ func (c *Cache[K, V]) GetOrSet(key K, val V, exp Expiration) (value V, present b
 		return currentEntry.val, true
 	}
 	c.m[key] = c.queue.add(entry[K, V]{key: key, val: val, exp: exp.new(now, c.defaultExp, c.sliding)})
-	c.mu.Unlock()
-	if c.onEviction != nil {
-		go c.onEviction(key, currentEntry.val, EvictionReasonExpired)
+	if c.maxEntriesLimit <= 0 || c.len() <= c.maxEntriesLimit {
+		c.mu.Unlock()
+		if ok && c.onEviction != nil {
+			go c.onEviction(key, currentNode.entry().val, EvictionReasonExpired)
+		}
+		return val, false
 	}
+	evictedNode := c.queue.pop()
+	evictedEntry := evictedNode.entry()
+	delete(c.m, evictedEntry.key)
+	c.mu.Unlock()
+	if c.onEviction == nil {
+		return val, false
+	}
+	go func() {
+		if ok {
+			c.onEviction(key, currentNode.entry().val, EvictionReasonExpired)
+		}
+		if evictedEntry.expired(now) {
+			c.onEviction(evictedEntry.key, evictedEntry.val, EvictionReasonExpired)
+		} else {
+			c.onEviction(evictedEntry.key, evictedEntry.val, EvictionReasonMaxEntriesExceeded)
+		}
+	}()
 	return val, false
 }
 
@@ -1082,7 +1082,7 @@ type entry[K comparable, V any] struct {
 }
 
 // expired returns true if the entry has expired.
-func (e *entry[K, V]) expired(now time.Time) bool {
+func (e entry[K, V]) expired(now time.Time) bool {
 	return e.exp.date > 0 && e.exp.date < now.UnixNano()
 }
 
