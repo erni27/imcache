@@ -46,38 +46,62 @@ func (r EvictionReason) String() string {
 // is evicted.
 type EvictionCallback[K comparable, V any] func(key K, val V, reason EvictionReason)
 
-// node is an eviction queue node.
-type node[K comparable] struct {
-	prev *node[K]
-	next *node[K]
-	key  K
+// node is the eviction queue node interface.
+type node[K comparable, V any] interface {
+	// entry returns the imcache entry associated with the node.
+	entry() entry[K, V]
+	// setEntry sets the imcache entry associated with the node.
+	setEntry(entry[K, V])
 }
 
-// evictionq is the eviction queue interface.
-type evictionq[K comparable] interface {
-	// AddNew adds a new node to the eviction queue and returns it.
-	AddNew(K) *node[K]
-	// Add adds an existing node to the eviction queue.
-	Add(*node[K])
-	// Remove removes a node from the eviction queue.
-	Remove(*node[K])
-	// Pop removes and returns node from the eviction queue.
-	Pop() *node[K]
+// evictionQueue is the eviction queue interface.
+// It is used to implement different eviction policies.
+type evictionQueue[K comparable, V any] interface {
+	// add adds a new node to the eviction queue and returns it.
+	add(entry[K, V]) node[K, V]
+	// remove removes the node from the eviction queue.
+	remove(node[K, V])
+	// pop removes and returns the node from the eviction queue
+	// according to the eviction policy.
+	pop() node[K, V]
+	// touch updates the node position in the eviction queue
+	// according to the eviction policy.
+	touch(node[K, V])
+	// touchall updates the node position in the eviction queue
+	// according to the eviction policy.
+	// It updates the node position in the context of GetAll operation.
+	//
+	// It simplifies preserving the eviction policy when the GetAll
+	// operation is used. Some eviction policies (e.g. LRU) may
+	// require to not update the node position in the eviction queue
+	// when the GetAll operation is used while other eviction policies
+	// (e.g. TTL) may require the update.
+	touchall(node[K, V])
 }
 
-// lruq is a simple LRU eviction queue.
-type lruq[K comparable] struct {
-	head *node[K]
-	tail *node[K]
+//lint:ignore U1000 false positive
+type lruNode[K comparable, V any] struct {
+	entr entry[K, V]
+	prev *lruNode[K, V]
+	next *lruNode[K, V]
 }
 
-func (q *lruq[K]) AddNew(key K) *node[K] {
-	n := &node[K]{key: key}
-	q.Add(n)
-	return n
+func (n *lruNode[K, V]) entry() entry[K, V] {
+	return n.entr
 }
 
-func (q *lruq[K]) Add(n *node[K]) {
+func (n *lruNode[K, V]) setEntry(entr entry[K, V]) {
+	n.entr = entr
+}
+
+//lint:ignore U1000 false positive
+type lruEvictionQueue[K comparable, V any] struct {
+	head *lruNode[K, V]
+	tail *lruNode[K, V]
+}
+
+func (q *lruEvictionQueue[K, V]) add(entr entry[K, V]) node[K, V] {
+	n := &lruNode[K, V]{entr: entr}
 	if q.head == nil {
 		q.tail = n
 	} else {
@@ -85,40 +109,75 @@ func (q *lruq[K]) Add(n *node[K]) {
 		n.next = q.head
 	}
 	q.head = n
+	return n
 }
 
-func (q *lruq[K]) Remove(n *node[K]) {
-	if n.prev == nil {
-		q.head = n.next
+func (q *lruEvictionQueue[K, V]) remove(n node[K, V]) {
+	lrun := n.(*lruNode[K, V])
+	if lrun.prev == nil {
+		q.head = lrun.next
 	} else {
-		n.prev.next = n.next
+		lrun.prev.next = lrun.next
 	}
-	if n.next == nil {
-		q.tail = n.prev
+	if lrun.next == nil {
+		q.tail = lrun.prev
 	} else {
-		n.next.prev = n.prev
+		lrun.next.prev = lrun.prev
 	}
 }
 
-func (q *lruq[K]) Pop() *node[K] {
+func (q *lruEvictionQueue[K, V]) pop() node[K, V] {
 	n := q.tail
 	if n != nil {
-		q.Remove(n)
+		q.remove(n)
 	}
 	return n
 }
 
-// nopq is a no-op eviction queue.
-// It is used when the cache does not have a max entries limit.
-type nopq[K comparable] struct{}
-
-func (*nopq[K]) AddNew(K) *node[K] { return nil }
-
-func (*nopq[K]) Add(*node[K]) {}
-
-func (*nopq[K]) Remove(*node[K]) {}
-
-func (*nopq[K]) Pop() *node[K] {
-	// imcache is carefully designed to never call Pop on a NOP queue.
-	panic("imcache: Pop called on a NOP queue")
+func (q *lruEvictionQueue[K, V]) touch(n node[K, V]) {
+	lrun := n.(*lruNode[K, V])
+	if lrun.prev == nil {
+		return
+	}
+	if lrun.next == nil {
+		q.tail = lrun.prev
+	} else {
+		lrun.next.prev = lrun.prev
+	}
+	lrun.prev.next = lrun.next
+	q.head.prev = lrun
+	lrun.next = q.head
+	lrun.prev = nil
+	q.head = lrun
 }
+
+func (q *lruEvictionQueue[K, V]) touchall(n node[K, V]) {}
+
+//lint:ignore U1000 false positive
+type nopNode[K comparable, V any] entry[K, V]
+
+func (n *nopNode[K, V]) entry() entry[K, V] {
+	return (entry[K, V])(*n)
+}
+
+func (n *nopNode[K, V]) setEntry(entr entry[K, V]) {
+	*n = nopNode[K, V](entr)
+}
+
+//lint:ignore U1000 false positive
+type nopEvictionQueue[K comparable, V any] struct{}
+
+func (nopEvictionQueue[K, V]) add(entr entry[K, V]) node[K, V] {
+	return (*nopNode[K, V])(&entr)
+}
+
+func (nopEvictionQueue[K, V]) remove(node[K, V]) {}
+
+func (nopEvictionQueue[K, V]) pop() node[K, V] {
+	// imcache is carefully designed to never call pop on a NOP queue.
+	panic("imcache: pop called on a NOP eviction queue")
+}
+
+func (nopEvictionQueue[K, V]) touch(node[K, V]) {}
+
+func (nopEvictionQueue[K, V]) touchall(node[K, V]) {}

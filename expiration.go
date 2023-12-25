@@ -2,10 +2,7 @@ package imcache
 
 import "time"
 
-const (
-	noExp      = -1
-	defaultExp = 0
-)
+const noExp = -1
 
 type expiration struct {
 	date    int64
@@ -14,27 +11,27 @@ type expiration struct {
 
 // Expiration is the expiration time of an entry.
 type Expiration interface {
-	apply(*expiration)
+	new(now time.Time, defaultExp time.Duration, sliding bool) expiration
 }
 
-type expirationf func(*expiration)
+type expirationf func(time.Time, time.Duration, bool) expiration
 
-func (f expirationf) apply(e *expiration) {
-	f(e)
+func (f expirationf) new(now time.Time, defaultExp time.Duration, sliding bool) expiration {
+	return f(now, defaultExp, sliding)
 }
 
 // WithExpiration returns an Expiration that sets the expiration time
 // to now + d.
 func WithExpiration(d time.Duration) Expiration {
-	return expirationf(func(e *expiration) {
-		e.date = time.Now().Add(d).UnixNano()
+	return expirationf(func(now time.Time, _ time.Duration, _ bool) expiration {
+		return expiration{date: now.Add(d).UnixNano()}
 	})
 }
 
 // WithExpirationDate returns an Expiration that sets the expiration time to t.
 func WithExpirationDate(t time.Time) Expiration {
-	return expirationf(func(e *expiration) {
-		e.date = t.UnixNano()
+	return expirationf(func(_ time.Time, _ time.Duration, _ bool) expiration {
+		return expiration{date: t.UnixNano()}
 	})
 }
 
@@ -45,24 +42,30 @@ func WithExpirationDate(t time.Time) Expiration {
 // expired if it has not been accessed. If the entry has been accessed,
 // the expiration time is reset to now + d where now is the time of the access.
 func WithSlidingExpiration(d time.Duration) Expiration {
-	return expirationf(func(e *expiration) {
-		e.date = time.Now().Add(d).UnixNano()
-		e.sliding = d
+	return expirationf(func(now time.Time, _ time.Duration, _ bool) expiration {
+		return expiration{date: now.Add(d).UnixNano(), sliding: d}
 	})
 }
 
 // WithNoExpiration returns an Expiration that sets the expiration time
 // to never expire.
 func WithNoExpiration() Expiration {
-	return expirationf(func(e *expiration) {
-		e.date = noExp
+	return expirationf(func(_ time.Time, _ time.Duration, _ bool) expiration {
+		return expiration{date: noExp}
 	})
 }
 
 // WithDefaultExpiration returns an Expiration that sets the expiration time
 // to the default expiration time.
 func WithDefaultExpiration() Expiration {
-	return expirationf(func(e *expiration) {
-		e.date = defaultExp
+	return expirationf(func(now time.Time, defaultExp time.Duration, sliding bool) expiration {
+		if defaultExp == noExp {
+			return expiration{date: noExp}
+		}
+		var slidingExp time.Duration
+		if sliding {
+			slidingExp = defaultExp
+		}
+		return expiration{date: now.Add(defaultExp).UnixNano(), sliding: slidingExp}
 	})
 }
