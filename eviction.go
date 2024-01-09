@@ -1,5 +1,15 @@
 package imcache
 
+// EvictionPolicy represents the eviction policy.
+type EvictionPolicy int32
+
+const (
+	// EvictionPolicyLRU is the least recently used eviction policy.
+	EvictionPolicyLRU EvictionPolicy = iota + 1
+	// EvictionPolicyLFU is the least frequently used eviction policy.
+	EvictionPolicyLFU
+)
+
 // EvictionReason is the reason why an entry was evicted.
 type EvictionReason int32
 
@@ -54,6 +64,19 @@ type node[K comparable, V any] interface {
 	setEntry(entry[K, V])
 }
 
+func newEvictionQueue[K comparable, V any](limit int, policy EvictionPolicy) evictionQueue[K, V] {
+	if limit <= 0 {
+		return nopEvictionQueue[K, V]{}
+	}
+	switch policy {
+	case EvictionPolicyLRU:
+		return &lruEvictionQueue[K, V]{}
+	case EvictionPolicyLFU:
+		return &lfuEvictionQueue[K, V]{freqs: make(map[int]*lfuLruEvictionQueue[K, V])}
+	}
+	return nopEvictionQueue[K, V]{}
+}
+
 // evictionQueue is the eviction queue interface.
 // It is used to implement different eviction policies.
 type evictionQueue[K comparable, V any] interface {
@@ -67,16 +90,16 @@ type evictionQueue[K comparable, V any] interface {
 	// touch updates the node position in the eviction queue
 	// according to the eviction policy.
 	touch(node[K, V])
-	// touchall updates the node position in the eviction queue
-	// according to the eviction policy.
-	// It updates the node position in the context of GetAll operation.
+	// touchall updates the node positions in the eviction queue
+	// according to the eviction policy in the context of the
+	// GetAll operation.
 	//
 	// It simplifies preserving the eviction policy when the GetAll
 	// operation is used. Some eviction policies (e.g. LRU) may
 	// require to not update the node position in the eviction queue
 	// when the GetAll operation is used while other eviction policies
-	// (e.g. TTL) may require the update.
-	touchall(node[K, V])
+	// (e.g. LFU) may require the update.
+	touchall()
 }
 
 //lint:ignore U1000 false positive
@@ -90,8 +113,8 @@ func (n *lruNode[K, V]) entry() entry[K, V] {
 	return n.entr
 }
 
-func (n *lruNode[K, V]) setEntry(entr entry[K, V]) {
-	n.entr = entr
+func (n *lruNode[K, V]) setEntry(e entry[K, V]) {
+	n.entr = e
 }
 
 //lint:ignore U1000 false positive
@@ -100,8 +123,8 @@ type lruEvictionQueue[K comparable, V any] struct {
 	tail *lruNode[K, V]
 }
 
-func (q *lruEvictionQueue[K, V]) add(entr entry[K, V]) node[K, V] {
-	n := &lruNode[K, V]{entr: entr}
+func (q *lruEvictionQueue[K, V]) add(e entry[K, V]) node[K, V] {
+	n := &lruNode[K, V]{entr: e}
 	if q.head == nil {
 		q.tail = n
 	} else {
@@ -128,9 +151,7 @@ func (q *lruEvictionQueue[K, V]) remove(n node[K, V]) {
 
 func (q *lruEvictionQueue[K, V]) pop() node[K, V] {
 	n := q.tail
-	if n != nil {
-		q.remove(n)
-	}
+	q.remove(n)
 	return n
 }
 
@@ -151,7 +172,153 @@ func (q *lruEvictionQueue[K, V]) touch(n node[K, V]) {
 	q.head = lrun
 }
 
-func (q *lruEvictionQueue[K, V]) touchall(n node[K, V]) {}
+func (q *lruEvictionQueue[K, V]) touchall() {}
+
+//lint:ignore U1000 false positive
+type lfuNode[K comparable, V any] struct {
+	entr entry[K, V]
+	next *lfuNode[K, V]
+	prev *lfuNode[K, V]
+	freq int
+}
+
+func (n *lfuNode[K, V]) entry() entry[K, V] {
+	return n.entr
+}
+
+func (n *lfuNode[K, V]) setEntry(e entry[K, V]) {
+	n.entr = e
+}
+
+//lint:ignore U1000 false positive
+type lfuLruEvictionQueue[K comparable, V any] struct {
+	next *lfuLruEvictionQueue[K, V]
+	prev *lfuLruEvictionQueue[K, V]
+	head *lfuNode[K, V]
+	tail *lfuNode[K, V]
+	freq int
+}
+
+func (q *lfuLruEvictionQueue[K, V]) add(n *lfuNode[K, V]) {
+	if q.head == nil {
+		q.tail = n
+	} else {
+		q.head.prev = n
+		n.next = q.head
+	}
+	q.head = n
+}
+
+func (q *lfuLruEvictionQueue[K, V]) remove(n *lfuNode[K, V]) {
+	if n.prev == nil {
+		q.head = n.next
+	} else {
+		n.prev.next = n.next
+	}
+	if n.next == nil {
+		q.tail = n.prev
+	} else {
+		n.next.prev = n.prev
+	}
+	n.next, n.prev = nil, nil
+}
+
+func (q *lfuLruEvictionQueue[K, V]) pop() *lfuNode[K, V] {
+	n := q.tail
+	if n != nil {
+		q.remove(n)
+	}
+	return n
+}
+
+//lint:ignore U1000 false positive
+type lfuEvictionQueue[K comparable, V any] struct {
+	freqs map[int]*lfuLruEvictionQueue[K, V]
+	head  *lfuLruEvictionQueue[K, V]
+	tail  *lfuLruEvictionQueue[K, V]
+}
+
+func (q *lfuEvictionQueue[K, V]) add(e entry[K, V]) node[K, V] {
+	n := &lfuNode[K, V]{entr: e, freq: 1}
+	lruq, ok := q.freqs[1]
+	if !ok {
+		lruq = &lfuLruEvictionQueue[K, V]{freq: 1}
+		q.freqs[1] = lruq
+		if q.tail != nil {
+			q.tail.next = lruq
+			lruq.prev = q.tail
+		}
+		q.tail = lruq
+		if q.head == nil {
+			q.head = lruq
+		}
+	}
+	lruq.add(n)
+	return n
+}
+
+func (q *lfuEvictionQueue[K, V]) pop() node[K, V] {
+	return q.tail.pop()
+}
+
+func (q *lfuEvictionQueue[K, V]) remove(n node[K, V]) {
+	lfun := n.(*lfuNode[K, V])
+	lruq := q.freqs[lfun.freq]
+	lruq.remove(lfun)
+	if lruq.head != nil {
+		return
+	}
+	q.removeq(lruq)
+}
+
+func (q *lfuEvictionQueue[K, V]) removeq(lruq *lfuLruEvictionQueue[K, V]) {
+	if lruq.prev == nil {
+		q.head = lruq.next
+	} else {
+		lruq.prev.next = lruq.next
+	}
+	if lruq.next == nil {
+		q.tail = lruq.prev
+	} else {
+		lruq.next.prev = lruq.prev
+	}
+	delete(q.freqs, lruq.freq)
+}
+
+func (q *lfuEvictionQueue[K, V]) touch(n node[K, V]) {
+	lfun := n.(*lfuNode[K, V])
+	lruq := q.freqs[lfun.freq]
+	lruq.remove(lfun)
+	lfun.freq++
+	newlruq, ok := q.freqs[lfun.freq]
+	if !ok {
+		newlruq = &lfuLruEvictionQueue[K, V]{freq: lfun.freq}
+		q.freqs[newlruq.freq] = newlruq
+		newlruq.prev = lruq.prev
+		newlruq.next = lruq
+		if lruq.prev == nil {
+			q.head = newlruq
+		} else {
+			newlruq.prev.next = newlruq
+		}
+		lruq.prev = newlruq
+	}
+	if lruq.head == nil {
+		q.removeq(lruq)
+	}
+	newlruq.add(lfun)
+}
+
+func (q *lfuEvictionQueue[K, V]) touchall() {
+	for lruq := q.head; lruq != nil; lruq = lruq.next {
+		for n := lruq.head; n != nil; n = n.next {
+			n.freq++
+		}
+		delete(q.freqs, lruq.freq)
+		lruq.freq++
+		q.freqs[lruq.freq] = lruq
+	}
+}
 
 //lint:ignore U1000 false positive
 type nopNode[K comparable, V any] entry[K, V]
@@ -160,15 +327,15 @@ func (n *nopNode[K, V]) entry() entry[K, V] {
 	return (entry[K, V])(*n)
 }
 
-func (n *nopNode[K, V]) setEntry(entr entry[K, V]) {
-	*n = nopNode[K, V](entr)
+func (n *nopNode[K, V]) setEntry(e entry[K, V]) {
+	*n = nopNode[K, V](e)
 }
 
 //lint:ignore U1000 false positive
 type nopEvictionQueue[K comparable, V any] struct{}
 
-func (nopEvictionQueue[K, V]) add(entr entry[K, V]) node[K, V] {
-	return (*nopNode[K, V])(&entr)
+func (nopEvictionQueue[K, V]) add(e entry[K, V]) node[K, V] {
+	return (*nopNode[K, V])(&e)
 }
 
 func (nopEvictionQueue[K, V]) remove(node[K, V]) {}
@@ -180,4 +347,4 @@ func (nopEvictionQueue[K, V]) pop() node[K, V] {
 
 func (nopEvictionQueue[K, V]) touch(node[K, V]) {}
 
-func (nopEvictionQueue[K, V]) touchall(node[K, V]) {}
+func (nopEvictionQueue[K, V]) touchall() {}

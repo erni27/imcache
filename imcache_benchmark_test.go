@@ -44,8 +44,8 @@ func BenchmarkSharded_Get(b *testing.B) {
 	}
 }
 
-func BenchmarkCache_Get_MaxEntriesLimit(b *testing.B) {
-	c := New[string, token](WithMaxEntriesOption[string, token](b.N))
+func BenchmarkCache_Get_MaxEntriesLimit_EvictionPolicyLRU(b *testing.B) {
+	c := New[string, token](WithMaxEntriesLimitOption[string, token](b.N, EvictionPolicyLRU))
 	for i := 0; i < b.N; i++ {
 		c.Set(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
 	}
@@ -59,10 +59,10 @@ func BenchmarkCache_Get_MaxEntriesLimit(b *testing.B) {
 	}
 }
 
-func BenchmarkSharded_Get_MaxEntriesLimit(b *testing.B) {
+func BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLRU(b *testing.B) {
 	for _, n := range []int{2, 4, 8, 16, 32, 64, 128} {
 		b.Run(fmt.Sprintf("%d_Shards", n), func(b *testing.B) {
-			c := NewSharded[string, token](n, DefaultStringHasher64{}, WithMaxEntriesOption[string, token](b.N/n))
+			c := NewSharded[string, token](n, DefaultStringHasher64{}, WithMaxEntriesLimitOption[string, token](b.N/n, EvictionPolicyLRU))
 			for i := 0; i < b.N; i++ {
 				c.Set(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
 			}
@@ -135,8 +135,8 @@ func BenchmarkSharded_Get_Parallel(b *testing.B) {
 	}
 }
 
-func BenchmarkCache_Get_MaxEntriesLimit_Parallel(b *testing.B) {
-	c := New[string, token](WithMaxEntriesOption[string, token](b.N))
+func BenchmarkCache_Get_MaxEntriesLimit_EvictionPolicyLRU_Parallel(b *testing.B) {
+	c := New[string, token](WithMaxEntriesLimitOption[string, token](b.N, EvictionPolicyLRU))
 	for i := 0; i < b.N; i++ {
 		c.Set(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
 	}
@@ -152,10 +152,10 @@ func BenchmarkCache_Get_MaxEntriesLimit_Parallel(b *testing.B) {
 	})
 }
 
-func BenchmarkSharded_Get_MaxEntriesLimit_Parallel(b *testing.B) {
+func BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLRU_Parallel(b *testing.B) {
 	for _, n := range []int{2, 4, 8, 16, 32, 64, 128} {
 		b.Run(fmt.Sprintf("%d_Shards", n), func(b *testing.B) {
-			c := NewSharded[string, token](n, DefaultStringHasher64{}, WithMaxEntriesOption[string, token](b.N/n))
+			c := NewSharded[string, token](n, DefaultStringHasher64{}, WithMaxEntriesLimitOption[string, token](b.N/n, EvictionPolicyLRU))
 			for i := 0; i < b.N; i++ {
 				c.Set(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
 			}
@@ -218,8 +218,8 @@ func BenchmarkSharded_Set(b *testing.B) {
 	}
 }
 
-func BenchmarkCache_Set_MaxEntriesLimit(b *testing.B) {
-	c := New[string, token](WithMaxEntriesOption[string, token](b.N / 2))
+func BenchmarkCache_Set_MaxEntriesLimit_EvictionPolicyLRU(b *testing.B) {
+	c := New[string, token](WithMaxEntriesLimitOption[string, token](b.N/2, EvictionPolicyLRU))
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -228,10 +228,10 @@ func BenchmarkCache_Set_MaxEntriesLimit(b *testing.B) {
 	}
 }
 
-func BenchmarkSharded_Set_MaxEntriesLimit(b *testing.B) {
+func BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLRU(b *testing.B) {
 	for _, n := range []int{2, 4, 8, 16, 32, 64, 128} {
 		b.Run(fmt.Sprintf("%d_Shards", n), func(b *testing.B) {
-			c := NewSharded[string, token](n, DefaultStringHasher64{}, WithMaxEntriesOption[string, token](b.N/n/2))
+			c := NewSharded[string, token](n, DefaultStringHasher64{}, WithMaxEntriesLimitOption[string, token](b.N/n/2, EvictionPolicyLRU))
 
 			b.ReportAllocs()
 			b.ResetTimer()
@@ -285,8 +285,8 @@ func BenchmarkSharded_Set_Parallel(b *testing.B) {
 	}
 }
 
-func BenchmarkCache_Set_MaxEntriesLimit_Parallel(b *testing.B) {
-	c := New[string, token](WithMaxEntriesOption[string, token](b.N / 2))
+func BenchmarkCache_Set_MaxEntriesLimit_EvictionPolicyLRU_Parallel(b *testing.B) {
+	c := New[string, token](WithMaxEntriesLimitOption[string, token](b.N/2, EvictionPolicyLRU))
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -298,10 +298,10 @@ func BenchmarkCache_Set_MaxEntriesLimit_Parallel(b *testing.B) {
 	})
 }
 
-func BenchmarkSharded_Set_MaxEntriesLimit_Parallel(b *testing.B) {
+func BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLRU_Parallel(b *testing.B) {
 	for _, n := range []int{2, 4, 8, 16, 32, 64, 128} {
 		b.Run(fmt.Sprintf("%d_Shards", n), func(b *testing.B) {
-			c := NewSharded[string, token](n, DefaultStringHasher64{}, WithMaxEntriesOption[string, token](b.N/n/2))
+			c := NewSharded[string, token](n, DefaultStringHasher64{}, WithMaxEntriesLimitOption[string, token](b.N/n/2, EvictionPolicyLRU))
 
 			b.ReportAllocs()
 			b.ResetTimer()

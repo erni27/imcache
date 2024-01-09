@@ -8,6 +8,7 @@ type options[K comparable, V any] struct {
 	defaultExp      time.Duration
 	sliding         bool
 	maxEntriesLimit int
+	evictionPolicy  EvictionPolicy
 	cleanerInterval time.Duration
 }
 
@@ -54,19 +55,29 @@ func WithDefaultSlidingExpirationOption[K comparable, V any](d time.Duration) Op
 	})
 }
 
-// WithMaxEntriesOption returns an Option that sets the cache maximum number
-// of entries. When the maximum number of entries is exceeded, the least
-// recently used entry is evicted regardless of the entry's expiration time.
+// WithMaxEntriesLimitOption returns an Option that sets the cache maximum
+// number of entries. When the limit is exceeded, the entry is evicted
+// according to the eviction policy.
 //
 // If used with Sharded type, the maximum size is per shard,
 // not the total size of all shards.
-func WithMaxEntriesOption[K comparable, V any](n int) Option[K, V] {
+func WithMaxEntriesLimitOption[K comparable, V any](limit int, policy EvictionPolicy) Option[K, V] {
 	return optionf[K, V](func(o *options[K, V]) {
-		if n <= 0 {
-			return
-		}
-		o.maxEntriesLimit = n
+		o.maxEntriesLimit = limit
+		o.evictionPolicy = policy
 	})
+}
+
+// WithMaxEntriesOption returns an Option that sets the cache maximum number
+// of entries. When the maximum number of entries is exceeded, the entry is evicted
+// according to the LRU eviction policy.
+//
+// If used with Sharded type, the maximum size is per shard,
+// not the total size of all shards.
+//
+// Deprecated: Use WithMaxEntriesLimitOption instead.
+func WithMaxEntriesOption[K comparable, V any](n int) Option[K, V] {
+	return WithMaxEntriesLimitOption[K, V](n, EvictionPolicyLRU)
 }
 
 // WithCleanerOption returns an Option that sets a cache cleaner that

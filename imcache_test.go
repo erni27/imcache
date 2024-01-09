@@ -1322,10 +1322,10 @@ func TestNewSharded_NilHasher(t *testing.T) {
 	_ = NewSharded[string, string](2, nil)
 }
 
-func TestCache_MaxEntriesLimit(t *testing.T) {
+func TestCache_MaxEntriesLimit_EvictionPolicyLRU(t *testing.T) {
 	evictioncMock := &evictionCallbackMock{}
 
-	c := New(WithEvictionCallbackOption(evictioncMock.Callback), WithMaxEntriesOption[string, interface{}](5))
+	c := New(WithEvictionCallbackOption(evictioncMock.Callback), WithMaxEntriesLimitOption[string, interface{}](5, EvictionPolicyLRU))
 	c.Set("one", 1, WithNoExpiration())
 	c.Set("two", 2, WithNoExpiration())
 	c.Set("three", 3, WithNoExpiration())
@@ -1337,19 +1337,19 @@ func TestCache_MaxEntriesLimit(t *testing.T) {
 	c.Set("six", 6, WithNoExpiration())
 	// LRU queue: six -> five -> four -> three -> two.
 	if _, ok := c.Get("one"); ok {
-		t.Error("want Cache.Get(_) = _, false, got _, true")
+		t.Fatal("want Cache.Get(_) = _, false, got _, true")
 	}
 	evictioncMock.HasEventuallyBeenCalledWith(t, "one", 1, EvictionReasonMaxEntriesExceeded)
 
 	// Get should move the entry to the front of the queue.
 	if _, ok := c.Get("two"); !ok {
-		t.Error("want Cache.Get(_) = _, true, got _, false")
+		t.Fatal("want Cache.Get(_) = _, true, got _, false")
 	}
 	// LRU queue: two -> six -> five -> four -> three.
 	c.Set("seven", 7, WithNoExpiration())
 	// LRU queue: seven -> two -> six -> five -> four.
 	if _, ok := c.Get("three"); ok {
-		t.Error("want Cache.Get(_) = _, false, got _, true")
+		t.Fatal("want Cache.Get(_) = _, false, got _, true")
 	}
 	evictioncMock.HasEventuallyBeenCalledWith(t, "three", 3, EvictionReasonMaxEntriesExceeded)
 
@@ -1358,31 +1358,31 @@ func TestCache_MaxEntriesLimit(t *testing.T) {
 	c.Set("eight", 8, WithNoExpiration())
 	// LRU queue: eight -> seven -> two -> six -> five.
 	if _, ok := c.Get("four"); ok {
-		t.Error("want Cache.Get(_) = _, false, got _, true")
+		t.Fatal("want Cache.Get(_) = _, false, got _, true")
 	}
 	evictioncMock.HasEventuallyBeenCalledWith(t, "four", 4, EvictionReasonExpired)
 
 	// Replace should update the entry and move it to the front of the queue.
 	if ok := c.Replace("five", 5, WithNoExpiration()); !ok {
-		t.Error("want Cache.Replace(_) = true, got false")
+		t.Fatal("want Cache.Replace(_) = true, got false")
 	}
 	// LRU queue: five -> eight -> seven -> two -> six.
 	c.Set("nine", 9, WithNoExpiration())
 	// LRU queue: nine -> five -> eight -> seven -> two.
 	if _, ok := c.Get("six"); ok {
-		t.Error("want Cache.Get(_) = _, false, got _, true")
+		t.Fatal("want Cache.Get(_) = _, false, got _, true")
 	}
 	evictioncMock.HasEventuallyBeenCalledWith(t, "six", 6, EvictionReasonMaxEntriesExceeded)
 
 	// ReplaceWithFunc should update the entry and move it to the front of the queue.
 	if ok := c.ReplaceWithFunc("two", func(interface{}) interface{} { return 2 }, WithNoExpiration()); !ok {
-		t.Error("want Cache.ReplaceWithFunc(_) = true, got false")
+		t.Fatal("want Cache.ReplaceWithFunc(_) = true, got false")
 	}
 	// LRU queue: two -> nine -> five -> eight -> seven.
 	c.Set("ten", 10, WithNoExpiration())
 	// LRU queue: ten -> two -> nine -> five -> eight.
 	if _, ok := c.Get("seven"); ok {
-		t.Error("want Cache.Get(_) = _, false, got _, true")
+		t.Fatal("want Cache.Get(_) = _, false, got _, true")
 	}
 	evictioncMock.HasEventuallyBeenCalledWith(t, "seven", 7, EvictionReasonMaxEntriesExceeded)
 
@@ -1390,7 +1390,7 @@ func TestCache_MaxEntriesLimit(t *testing.T) {
 	c.Set("ten", 10, WithNoExpiration())
 	// LRU queue: ten -> two -> nine -> five -> eight.
 	if _, ok := c.Get("eight"); !ok {
-		t.Error("want Cache.Get(_) = _, true, got _, false")
+		t.Fatal("want Cache.Get(_) = _, true, got _, false")
 	}
 	// LRU queue: eight -> ten -> two -> nine -> five.
 
@@ -1400,25 +1400,25 @@ func TestCache_MaxEntriesLimit(t *testing.T) {
 	c.Set("eleven", 11, WithNoExpiration())
 	// LRU queue: eleven -> eight -> ten -> two -> nine.
 	if _, ok := c.Get("five"); ok {
-		t.Error("want Cache.Get(_) = _, false, got _, true")
+		t.Fatal("want Cache.Get(_) = _, false, got _, true")
 	}
 	evictioncMock.HasEventuallyBeenCalledWith(t, "five", 5, EvictionReasonMaxEntriesExceeded)
 
 	// Remove should not mess with the LRU queue.
 	if ok := c.Remove("two"); !ok {
-		t.Error("want Cache.Remove(_) = true, got false")
+		t.Fatal("want Cache.Remove(_) = true, got false")
 	}
 	// LRU queue: eleven -> eight -> ten -> nine.
 	c.Set("twelve", 12, WithNoExpiration())
 	// LRU queue: twelve -> eleven -> eight -> ten -> nine.
 	if _, ok := c.Get("nine"); !ok {
-		t.Error("want Cache.Get(_) = _, true, got _, false")
+		t.Fatal("want Cache.Get(_) = _, true, got _, false")
 	}
 	// LRU queue: nine -> twelve -> eleven -> eight -> ten.
 	c.Set("thirteen", 13, WithNoExpiration())
 	// LRU queue: thirteen -> nine -> twelve -> eleven -> eight.
 	if _, ok := c.Get("ten"); ok {
-		t.Error("want Cache.Get(_) = _, false, got _, true")
+		t.Fatal("want Cache.Get(_) = _, false, got _, true")
 	}
 	evictioncMock.HasEventuallyBeenCalledWith(t, "ten", 10, EvictionReasonMaxEntriesExceeded)
 
@@ -1432,13 +1432,13 @@ func TestCache_MaxEntriesLimit(t *testing.T) {
 	c.Set("eighteen", 18, WithNoExpiration())
 	// LRU queue: eighteen -> seventeen -> sixteen -> fifteen -> fourteen.
 	if _, ok := c.Get("fourteen"); !ok {
-		t.Error("Cache.Get(_) = _, false, want _, true")
+		t.Fatal("Cache.Get(_) = _, false, want _, true")
 	}
 	// LRU queue: fourteen -> eighteen -> seventeen -> sixteen -> fifteen.
 	c.Set("nineteen", 19, WithExpiration(time.Nanosecond))
 	// LRU queue: nineteen -> fourteen -> eighteen -> seventeen -> sixteen.
 	if _, ok := c.Get("fifteen"); ok {
-		t.Error("Cache.Get(_) = _, true, got _, false")
+		t.Fatal("Cache.Get(_) = _, true, got _, false")
 	}
 	evictioncMock.HasEventuallyBeenCalledWith(t, "fifteen", 15, EvictionReasonMaxEntriesExceeded)
 
@@ -1448,29 +1448,29 @@ func TestCache_MaxEntriesLimit(t *testing.T) {
 	c.Set("twenty", 20, WithNoExpiration())
 	// LRU queue: twenty -> fourteen -> eighteen -> seventeen.
 	if _, ok := c.Get("seventeen"); !ok {
-		t.Error("Cache.Get(_) = _, false, want _, true")
+		t.Fatal("Cache.Get(_) = _, false, want _, true")
 	}
 	// LRU queue: seventeen -> twenty -> fourteen -> eighteen.
 	c.Set("twentyone", 21, WithExpiration(200*time.Millisecond))
 	// LRU queue: twentyone -> seventeen -> twenty -> fourteen -> eighteen.
 	if _, ok := c.Get("eighteen"); !ok {
-		t.Error("Cache.Get(_) = _, false, got _, true")
+		t.Fatal("Cache.Get(_) = _, false, got _, true")
 	}
 	// LRU queue: eighteen -> twentyone -> seventeen -> twenty -> fourteen.
 
 	// GetOrSet should cause eviction if the size is exceeded.
 	if _, ok := c.GetOrSet("twentytwo", 22, WithNoExpiration()); ok {
-		t.Error("Cache.GetOrSet(_, _, _) = _, true, want _, false")
+		t.Fatal("Cache.GetOrSet(_, _, _) = _, true, want _, false")
 	}
 	// LRU queue: twentytwo -> eighteen -> twentyone -> seventeen -> twenty.
 	if _, ok := c.Get("fourteen"); ok {
-		t.Error("Cache.Get(_) = _, true, got _, false")
+		t.Fatal("Cache.Get(_) = _, true, got _, false")
 	}
 	evictioncMock.HasEventuallyBeenCalledWith(t, "fourteen", 14, EvictionReasonMaxEntriesExceeded)
 
 	// GetOrSet should move the entry to the front of the LRU queue.
 	if _, ok := c.GetOrSet("twenty", 20, WithNoExpiration()); !ok {
-		t.Error("Cache.GetOrSet(_, _, _) = _, false, want _, true")
+		t.Fatal("Cache.GetOrSet(_, _, _) = _, false, want _, true")
 	}
 	// LRU queue: twenty -> twentytwo -> eighteen -> twentyone -> seventeen.
 	// Wait until seventeen is expired.
@@ -1479,7 +1479,7 @@ func TestCache_MaxEntriesLimit(t *testing.T) {
 	c.Set("twentythree", 23, WithNoExpiration())
 	// LRU queue: twentythree -> twenty -> twentytwo -> eighteen -> twentyone.
 	if _, ok := c.Get("seventeen"); ok {
-		t.Error("Cache.Get(_) = _, true, got _, false")
+		t.Fatal("Cache.Get(_) = _, true, got _, false")
 	}
 	// seventeen should be evicted with an expired reason instead of max entries exceeded.
 	evictioncMock.HasEventuallyBeenCalledWith(t, "seventeen", 17, EvictionReasonExpired)
@@ -1487,53 +1487,251 @@ func TestCache_MaxEntriesLimit(t *testing.T) {
 	<-time.After(100 * time.Millisecond)
 	// twentyone is expired, but it's still in the cache.
 	if _, ok := c.GetOrSet("twentyfour", 24, WithNoExpiration()); ok {
-		t.Error("Cache.GetOrSet(_, _, _) = _, true, want _, false")
+		t.Fatal("Cache.GetOrSet(_, _, _) = _, true, want _, false")
 	}
 	// LRU queue: twentyfour -> twentythree -> twenty -> twentytwo -> eighteen.
 	if _, ok := c.Get("twentyone"); ok {
-		t.Error("Cache.Get(_) = _, true, got _, false")
+		t.Fatal("Cache.Get(_) = _, true, got _, false")
 	}
 	// twentyone should be evicted with an expired reason instead of max entries exceeded.
 	evictioncMock.HasEventuallyBeenCalledWith(t, "twentyone", 21, EvictionReasonExpired)
+
 	// GetMultiple should move the entries to the front of the LRU queue.
 	if got := c.GetMultiple("eighteen", "twentytwo"); len(got) == 0 {
-		t.Errorf("Cache.GetMultiple(_) = %v, want non-empty", got)
+		t.Fatalf("len(Cache.GetMultiple(_)) = %d, want 2", len(got))
 	}
 	// LRU queue: twentytwo -> eighteen -> twentyfour -> twentythree -> twenty.
 	c.Set("twentyfive", 25, WithNoExpiration())
 	// LRU queue: twentyfive -> twentytwo -> eighteen -> twentyfour -> twentythree.
 	if _, ok := c.Get("twenty"); ok {
-		t.Error("Cache.Get(_) = _, true, got _, false")
+		t.Fatal("Cache.Get(_) = _, true, got _, false")
 	}
 	evictioncMock.HasEventuallyBeenCalledWith(t, "twenty", 20, EvictionReasonMaxEntriesExceeded)
+
 	// CompareAndSwap should move the entry to the front of the LRU queue if swapped.
 	if swapped, present := c.CompareAndSwap("twentythree", 23, 2323, func(_, _ interface{}) bool { return true }, WithNoExpiration()); !present || !swapped {
-		t.Errorf("Cache.CompareAndSwap(_, _, _, _, _) = %t, %t, want _, _, true, true", swapped, present)
+		t.Fatalf("Cache.CompareAndSwap(_, _, _, _, _) = %t, %t, want true, true", swapped, present)
 	}
 	// LRU queue: twentythree -> twentyfive -> twentytwo -> eighteen -> twentyfour.
 	c.Set("twentysix", 26, WithNoExpiration())
 	// LRU queue: twentysix -> twentythree -> twentyfive -> twentytwo -> eighteen.
 	if _, ok := c.Get("twentyfour"); ok {
-		t.Error("Cache.Get(_) = _, true, got _, false")
+		t.Fatal("Cache.Get(_) = _, true, got _, false")
 	}
 	evictioncMock.HasEventuallyBeenCalledWith(t, "twentyfour", 24, EvictionReasonMaxEntriesExceeded)
-	// CompareAndSwap should not move the entry to the front of the LRU queue if not swapped.
+
+	// CompareAndSwap should move the entry to the front of the LRU queue if not swapped.
 	if swapped, present := c.CompareAndSwap("eighteen", 18, 1818, func(_, _ interface{}) bool { return false }, WithNoExpiration()); swapped || !present {
-		t.Errorf("Cache.CompareAndSwap(_, _, _, _, _) = %t, %t, want _, _, false, true", swapped, present)
+		t.Fatalf("Cache.CompareAndSwap(_, _, _, _, _) = %t, %t, want false, true", swapped, present)
 	}
 	// LRU queue: eighteen -> twentysix -> twentythree -> twentyfive -> twentytwo.
 	c.Set("twentyseven", 27, WithNoExpiration())
 	// LRU queue: twentyseven -> eighteen -> twentysix -> twentythree -> twentyfive.
 	if _, ok := c.Get("twentytwo"); ok {
-		t.Error("Cache.Get(_) = _, true, got _, false")
+		t.Fatal("Cache.Get(_) = _, true, got _, false")
 	}
 	evictioncMock.HasEventuallyBeenCalledWith(t, "twentytwo", 22, EvictionReasonMaxEntriesExceeded)
 }
 
-func TestSharded_ReplaceKey_MaxEntriesLimit(t *testing.T) {
+func TestCache_MaxEntriesLimit_EvictionPolicyLRU_NoEvictionCallback(t *testing.T) {
+	c := New(WithMaxEntriesLimitOption[string, interface{}](5, EvictionPolicyLRU))
+	c.Set("one", 1, WithNoExpiration())
+	c.Set("two", 2, WithNoExpiration())
+	c.Set("three", 3, WithNoExpiration())
+	c.Set("four", 4, WithExpiration(time.Nanosecond))
+	c.Set("five", 5, WithNoExpiration())
+	// LRU queue: five -> four -> three -> two -> one.
+
+	// Set should evict the last entry from the queue if the size is exceeded.
+	c.Set("six", 6, WithNoExpiration())
+	// LRU queue: six -> five -> four -> three -> two.
+	if _, ok := c.Get("one"); ok {
+		t.Fatal("want Cache.Get(_) = _, false, got _, true")
+	}
+
+	// Get should move the entry to the front of the queue.
+	if _, ok := c.Get("two"); !ok {
+		t.Fatal("want Cache.Get(_) = _, true, got _, false")
+	}
+	// LRU queue: two -> six -> five -> four -> three.
+	c.Set("seven", 7, WithNoExpiration())
+	// LRU queue: seven -> two -> six -> five -> four.
+	if _, ok := c.Get("three"); ok {
+		t.Fatal("want Cache.Get(_) = _, false, got _, true")
+	}
+
+	// Set should evict the last entry from the queue if the size is exceeded
+	// and if the entry is expired the eviction reason should be EvictionReasonExpired.
+	c.Set("eight", 8, WithNoExpiration())
+	// LRU queue: eight -> seven -> two -> six -> five.
+	if _, ok := c.Get("four"); ok {
+		t.Fatal("want Cache.Get(_) = _, false, got _, true")
+	}
+
+	// Replace should update the entry and move it to the front of the queue.
+	if ok := c.Replace("five", 5, WithNoExpiration()); !ok {
+		t.Fatal("want Cache.Replace(_) = true, got false")
+	}
+	// LRU queue: five -> eight -> seven -> two -> six.
+	c.Set("nine", 9, WithNoExpiration())
+	// LRU queue: nine -> five -> eight -> seven -> two.
+	if _, ok := c.Get("six"); ok {
+		t.Fatal("want Cache.Get(_) = _, false, got _, true")
+	}
+
+	// ReplaceWithFunc should update the entry and move it to the front of the queue.
+	if ok := c.ReplaceWithFunc("two", func(interface{}) interface{} { return 2 }, WithNoExpiration()); !ok {
+		t.Fatal("want Cache.ReplaceWithFunc(_) = true, got false")
+	}
+	// LRU queue: two -> nine -> five -> eight -> seven.
+	c.Set("ten", 10, WithNoExpiration())
+	// LRU queue: ten -> two -> nine -> five -> eight.
+	if _, ok := c.Get("seven"); ok {
+		t.Fatal("want Cache.Get(_) = _, false, got _, true")
+	}
+
+	// Set should not evict any entry if the size is not exceeded.
+	c.Set("ten", 10, WithNoExpiration())
+	// LRU queue: ten -> two -> nine -> five -> eight.
+	if _, ok := c.Get("eight"); !ok {
+		t.Fatal("want Cache.Get(_) = _, true, got _, false")
+	}
+	// LRU queue: eight -> ten -> two -> nine -> five.
+
+	// GetAll should not change the LRU queue.
+	c.GetAll()
+	// LRU queue: eight -> ten -> two -> nine -> five.
+	c.Set("eleven", 11, WithNoExpiration())
+	// LRU queue: eleven -> eight -> ten -> two -> nine.
+	if _, ok := c.Get("five"); ok {
+		t.Fatal("want Cache.Get(_) = _, false, got _, true")
+	}
+
+	// Remove should not mess with the LRU queue.
+	if ok := c.Remove("two"); !ok {
+		t.Fatal("want Cache.Remove(_) = true, got false")
+	}
+	// LRU queue: eleven -> eight -> ten -> nine.
+	c.Set("twelve", 12, WithNoExpiration())
+	// LRU queue: twelve -> eleven -> eight -> ten -> nine.
+	if _, ok := c.Get("nine"); !ok {
+		t.Fatal("want Cache.Get(_) = _, true, got _, false")
+	}
+	// LRU queue: nine -> twelve -> eleven -> eight -> ten.
+	c.Set("thirteen", 13, WithNoExpiration())
+	// LRU queue: thirteen -> nine -> twelve -> eleven -> eight.
+	if _, ok := c.Get("ten"); ok {
+		t.Fatal("want Cache.Get(_) = _, false, got _, true")
+	}
+
+	// RemoveAll reset the LRU queue.
+	c.RemoveAll()
+	// LRU queue: empty.
+	c.Set("fourteen", 14, WithNoExpiration())
+	c.Set("fifteen", 15, WithNoExpiration())
+	c.Set("sixteen", 16, WithExpiration(time.Nanosecond))
+	c.Set("seventeen", 17, WithExpiration(100*time.Millisecond))
+	c.Set("eighteen", 18, WithNoExpiration())
+	// LRU queue: eighteen -> seventeen -> sixteen -> fifteen -> fourteen.
+	if _, ok := c.Get("fourteen"); !ok {
+		t.Fatal("Cache.Get(_) = _, false, want _, true")
+	}
+	// LRU queue: fourteen -> eighteen -> seventeen -> sixteen -> fifteen.
+	c.Set("nineteen", 19, WithExpiration(time.Nanosecond))
+	// LRU queue: nineteen -> fourteen -> eighteen -> seventeen -> sixteen.
+	if _, ok := c.Get("fifteen"); ok {
+		t.Fatal("Cache.Get(_) = _, true, got _, false")
+	}
+
+	// RemoveExpired should not mess with the LRU queue.
+	c.RemoveExpired()
+	// LRU queue: fourteen -> eighteen -> seventeen.
+	c.Set("twenty", 20, WithNoExpiration())
+	// LRU queue: twenty -> fourteen -> eighteen -> seventeen.
+	if _, ok := c.Get("seventeen"); !ok {
+		t.Fatal("Cache.Get(_) = _, false, want _, true")
+	}
+	// LRU queue: seventeen -> twenty -> fourteen -> eighteen.
+	c.Set("twentyone", 21, WithExpiration(200*time.Millisecond))
+	// LRU queue: twentyone -> seventeen -> twenty -> fourteen -> eighteen.
+	if _, ok := c.Get("eighteen"); !ok {
+		t.Fatal("Cache.Get(_) = _, false, got _, true")
+	}
+	// LRU queue: eighteen -> twentyone -> seventeen -> twenty -> fourteen.
+
+	// GetOrSet should cause eviction if the size is exceeded.
+	if _, ok := c.GetOrSet("twentytwo", 22, WithNoExpiration()); ok {
+		t.Fatal("Cache.GetOrSet(_, _, _) = _, true, want _, false")
+	}
+	// LRU queue: twentytwo -> eighteen -> twentyone -> seventeen -> twenty.
+	if _, ok := c.Get("fourteen"); ok {
+		t.Fatal("Cache.Get(_) = _, true, got _, false")
+	}
+
+	// GetOrSet should move the entry to the front of the LRU queue.
+	if _, ok := c.GetOrSet("twenty", 20, WithNoExpiration()); !ok {
+		t.Fatal("Cache.GetOrSet(_, _, _) = _, false, want _, true")
+	}
+	// LRU queue: twenty -> twentytwo -> eighteen -> twentyone -> seventeen.
+	// Wait until seventeen is expired.
+	<-time.After(100 * time.Millisecond)
+	// seventeen is expired, but it's still in the cache.
+	c.Set("twentythree", 23, WithNoExpiration())
+	// LRU queue: twentythree -> twenty -> twentytwo -> eighteen -> twentyone.
+	if _, ok := c.Get("seventeen"); ok {
+		t.Fatal("Cache.Get(_) = _, true, got _, false")
+	}
+	// seventeen should be evicted with an expired reason instead of max entries exceeded.
+	// Wait until twentyone is expired.
+	<-time.After(100 * time.Millisecond)
+	// twentyone is expired, but it's still in the cache.
+	if _, ok := c.GetOrSet("twentyfour", 24, WithNoExpiration()); ok {
+		t.Fatal("Cache.GetOrSet(_, _, _) = _, true, want _, false")
+	}
+	// LRU queue: twentyfour -> twentythree -> twenty -> twentytwo -> eighteen.
+	if _, ok := c.Get("twentyone"); ok {
+		t.Fatal("Cache.Get(_) = _, true, got _, false")
+	}
+	// twentyone should be evicted with an expired reason instead of max entries exceeded.
+
+	// GetMultiple should move the entries to the front of the LRU queue.
+	if got := c.GetMultiple("eighteen", "twentytwo"); len(got) == 0 {
+		t.Fatalf("len(Cache.GetMultiple(_)) = %d, want 2", len(got))
+	}
+	// LRU queue: twentytwo -> eighteen -> twentyfour -> twentythree -> twenty.
+	c.Set("twentyfive", 25, WithNoExpiration())
+	// LRU queue: twentyfive -> twentytwo -> eighteen -> twentyfour -> twentythree.
+	if _, ok := c.Get("twenty"); ok {
+		t.Fatal("Cache.Get(_) = _, true, got _, false")
+	}
+
+	// CompareAndSwap should move the entry to the front of the LRU queue if swapped.
+	if swapped, present := c.CompareAndSwap("twentythree", 23, 2323, func(_, _ interface{}) bool { return true }, WithNoExpiration()); !present || !swapped {
+		t.Fatalf("Cache.CompareAndSwap(_, _, _, _, _) = %t, %t, want true, true", swapped, present)
+	}
+	// LRU queue: twentythree -> twentyfive -> twentytwo -> eighteen -> twentyfour.
+	c.Set("twentysix", 26, WithNoExpiration())
+	// LRU queue: twentysix -> twentythree -> twentyfive -> twentytwo -> eighteen.
+	if _, ok := c.Get("twentyfour"); ok {
+		t.Fatal("Cache.Get(_) = _, true, got _, false")
+	}
+
+	// CompareAndSwap should move the entry to the front of the LRU queue if not swapped.
+	if swapped, present := c.CompareAndSwap("eighteen", 18, 1818, func(_, _ interface{}) bool { return false }, WithNoExpiration()); swapped || !present {
+		t.Fatalf("Cache.CompareAndSwap(_, _, _, _, _) = %t, %t, want false, true", swapped, present)
+	}
+	// LRU queue: eighteen -> twentysix -> twentythree -> twentyfive -> twentytwo.
+	c.Set("twentyseven", 27, WithNoExpiration())
+	// LRU queue: twentyseven -> eighteen -> twentysix -> twentythree -> twentyfive.
+	if _, ok := c.Get("twentytwo"); ok {
+		t.Fatal("Cache.Get(_) = _, true, got _, false")
+	}
+}
+
+func TestSharded_ReplaceKey_MaxEntriesLimit_EvictionPolicyLRU(t *testing.T) {
 	evictioncMock := &evictionCallbackMock{}
 	s := NewSharded[string, interface{}](2, DefaultStringHasher64{},
-		WithMaxEntriesOption[string, interface{}](1),
+		WithMaxEntriesLimitOption[string, interface{}](1, EvictionPolicyLRU),
 		WithEvictionCallbackOption(evictioncMock.Callback),
 	)
 	s.Set("key-1", 1, WithNoExpiration())
@@ -1569,8 +1767,8 @@ func TestSharded_ReplaceKey_MaxEntriesLimit(t *testing.T) {
 	evictioncMock.HasEventuallyBeenCalledWith(t, "key-3", 2, EvictionReasonExpired)
 }
 
-func TestSharded_ReplaceKey_MaxEntriesLimit_NoEvictionCallback(t *testing.T) {
-	s := NewSharded[string, interface{}](2, DefaultStringHasher64{}, WithMaxEntriesOption[string, interface{}](1))
+func TestSharded_ReplaceKey_MaxEntriesLimit_EvictionPolicyLRU_NoEvictionCallback(t *testing.T) {
+	s := NewSharded[string, interface{}](2, DefaultStringHasher64{}, WithMaxEntriesLimitOption[string, interface{}](1, EvictionPolicyLRU))
 	s.Set("key-1", 1, WithNoExpiration())
 	s.Set("key-2", 2, WithNoExpiration())
 	if ok := s.ReplaceKey("key-2", "key-3", WithExpiration(time.Nanosecond)); !ok {
@@ -1586,25 +1784,201 @@ func TestSharded_ReplaceKey_MaxEntriesLimit_NoEvictionCallback(t *testing.T) {
 	}
 }
 
-func TestCache_MaxEntriesLimit_NoEvictionCallback(t *testing.T) {
-	c := New(WithMaxEntriesOption[string, int](1))
+func TestCache_MaxEntriesLimit_EvictionPolicyLFU(t *testing.T) {
+	evictioncMock := &evictionCallbackMock{}
+
+	c := New(WithEvictionCallbackOption(evictioncMock.Callback), WithMaxEntriesLimitOption[string, interface{}](5, EvictionPolicyLFU))
 	c.Set("one", 1, WithNoExpiration())
 	c.Set("two", 2, WithNoExpiration())
+	c.Set("three", 3, WithNoExpiration())
+	c.Set("four", 4, WithNoExpiration())
+	c.Set("five", 5, WithNoExpiration())
+	// LFU queue: five -> four -> three -> two -> one.
+
+	// Set should evict the last entry from the queue if the size is exceeded.
+	// All entries have the same frequency hence the LRU policy applied.
+	c.Set("six", 6, WithNoExpiration())
+	// LFU queue: six -> five -> four -> three -> two.
 	if _, ok := c.Get("one"); ok {
-		t.Error("Cache.Get(_) = _, true, want _, false")
+		t.Fatal("want Cache.Get(_) = _, false, got _, true")
 	}
-	if _, ok := c.GetOrSet("three", 3, WithNoExpiration()); ok {
-		t.Error("Cache.GetOrSet(_, _, _) = _, true, want _, false")
+	evictioncMock.HasEventuallyBeenCalledWith(t, "one", 1, EvictionReasonMaxEntriesExceeded)
+
+	// Get should update the entries frequency.
+	if _, ok := c.Get("two"); !ok {
+		t.Fatal("want Cache.Get(_) = _, true, got _, false")
 	}
-	if _, ok := c.Get("two"); ok {
-		t.Error("Cache.Get(_) = _, true, want _, false")
+	if _, ok := c.Get("two"); !ok {
+		t.Fatal("want Cache.Get(_) = _, true, got _, false")
 	}
+	if _, ok := c.Get("three"); !ok {
+		t.Fatal("want Cache.Get(_) = _, true, got _, false")
+	}
+	if _, ok := c.Get("four"); !ok {
+		t.Fatal("want Cache.Get(_) = _, true, got _, false")
+	}
+	if _, ok := c.Get("five"); !ok {
+		t.Fatal("want Cache.Get(_) = _, true, got _, false")
+	}
+	if _, ok := c.Get("six"); !ok {
+		t.Fatal("want Cache.Get(_) = _, true, got _, false")
+	}
+	// LFU queue: two -> six -> five -> four -> three.
+	c.Set("seven", 7, WithExpiration(time.Nanosecond))
+	// LFU queue: two -> six -> five -> four -> seven.
+	if _, ok := c.Get("three"); ok {
+		t.Fatal("want Cache.Get(_) = _, false, got _, true")
+	}
+	evictioncMock.HasEventuallyBeenCalledWith(t, "three", 3, EvictionReasonMaxEntriesExceeded)
+
+	// Set should evict the last entry from the queue if the size is exceeded
+	// and if the entry is expired the eviction reason should be EvictionReasonExpired.
+	c.Set("eight", 8, WithNoExpiration())
+	// LFU queue: two -> six -> five -> four -> eight.
+	if _, ok := c.Get("seven"); ok {
+		t.Fatal("want Cache.Get(_) = _, false, got _, true")
+	}
+	evictioncMock.HasEventuallyBeenCalledWith(t, "seven", 7, EvictionReasonExpired)
+
+	// Replace should update the frequency of the entry if the entry already exists.
+	c.Set("eight", 8, WithNoExpiration())
+	// LFU queue: two -> eight -> six -> five -> four.
+	c.Set("nine", 9, WithNoExpiration())
+	// LFU queue: two -> eight -> six -> five -> nine.
+	if _, ok := c.Get("four"); ok {
+		t.Fatal("want Cache.Get(_) = _, false, got _, true")
+	}
+	evictioncMock.HasEventuallyBeenCalledWith(t, "four", 4, EvictionReasonMaxEntriesExceeded)
+
+	// Replace should update the entry frequency.
+	if ok := c.Replace("nine", 9, WithNoExpiration()); !ok {
+		t.Fatal("want Cache.Replace(_) = true, got false")
+	}
+	// LFU queue: two -> nine -> eight -> six -> five.
+	c.Set("ten", 10, WithNoExpiration())
+	// LFU queue: two -> nine -> eight -> six -> ten.
+	evictioncMock.HasEventuallyBeenCalledWith(t, "five", 5, EvictionReasonMaxEntriesExceeded)
+
+	// ReplaceWithFunc should update the entry frequency.
+	if ok := c.ReplaceWithFunc("ten", func(interface{}) interface{} { return 10 }, WithNoExpiration()); !ok {
+		t.Fatal("want Cache.ReplaceWithFunc(_) = true, got false")
+	}
+	// LFU queue: two -> ten -> nine -> eight -> six.
+	c.Set("eleven", 11, WithNoExpiration())
+	// LFU queue: two -> ten -> nine -> eight -> eleven.
+	if _, ok := c.Get("six"); ok {
+		t.Fatal("want Cache.Get(_) = _, false, got _, true")
+	}
+	evictioncMock.HasEventuallyBeenCalledWith(t, "six", 6, EvictionReasonMaxEntriesExceeded)
+
+	if ok := c.Remove("eight"); !ok {
+		t.Fatal("want Cache.Remove(_) = true, got false")
+	}
+	// LFU queue: two -> ten -> nine -> eleven.
+	c.Set("twelve", 12, WithNoExpiration())
+	// LFU queue: two -> ten -> nine -> twelve -> eleven.
+
+	// GetAll should update the frequency of all the entries.
+	c.GetAll()
+	// LFU queue: two -> ten -> nine -> twelve -> eleven.
+	c.Set("thirteen", 13, WithNoExpiration())
+	// LFU queue: two -> ten -> nine -> twelve -> thirteen.
+	if _, ok := c.Get("eleven"); ok {
+		t.Fatal("want Cache.Get(_) = _, false, got _, true")
+	}
+	evictioncMock.HasEventuallyBeenCalledWith(t, "eleven", 11, EvictionReasonMaxEntriesExceeded)
+	c.Set("fourteen", 14, WithNoExpiration())
+	// LFU queue: two -> ten -> nine -> twelve -> fourteen.
+	if _, ok := c.Get("thirteen"); ok {
+		t.Fatal("want Cache.Get(_) = _, false, got _, true")
+	}
+	evictioncMock.HasEventuallyBeenCalledWith(t, "thirteen", 13, EvictionReasonMaxEntriesExceeded)
+
+	// RemoveAll resets the LFU queue.
+	c.RemoveAll()
+	c.Set("fifteen", 15, WithNoExpiration())
+	c.Set("sixteen", 16, WithNoExpiration())
+	c.Set("seventeen", 17, WithExpiration(time.Nanosecond))
+	c.Set("eighteen", 18, WithNoExpiration())
+	c.Set("nineteen", 19, WithExpiration(time.Nanosecond))
+	// LFU queue: nineteen -> eighteen -> seventeen -> sixteen -> fifteen.
+	c.RemoveExpired()
+	// LFU queue: eighteen -> sixteen -> fifteen.
+	c.GetAll()
+	// LFU queue: eighteen -> sixteen -> fifteen.
+	c.Set("twenty", 20, WithNoExpiration())
+	// LFU queue: eighteen -> sixteen -> fifteen -> twenty.
+	c.Set("twentyone", 21, WithNoExpiration())
+	// LFU queue: eighteen -> sixteen -> fifteen -> twentyone -> twenty.
+	// GetOrSet should cause eviction if the entry doesn't exist and the size is exceeded.
+	if _, ok := c.GetOrSet("twentytwo", 22, WithNoExpiration()); ok {
+		t.Fatal("Cache.GetOrSet(_, _, _) = _, true, want _, false")
+	}
+	// LFU queue: eighteen -> sixteen -> fifteen -> twentytwo -> twentyone.
+	if _, ok := c.Get("twenty"); ok {
+		t.Fatal("Cache.Get(_) = _, true, got _, false")
+	}
+	evictioncMock.HasEventuallyBeenCalledWith(t, "twenty", 20, EvictionReasonMaxEntriesExceeded)
+
+	// GetOrSet should update the entry frequency if the entry exists.
+	if _, ok := c.GetOrSet("twentytwo", 22, WithNoExpiration()); !ok {
+		t.Fatal("Cache.GetOrSet(_, _, _) = _, false, want _, true")
+	}
+	// LFU queue: twentytwo -> eighteen -> sixteen -> fifteen -> twentyone.
+	c.Set("twentythree", 23, WithNoExpiration())
+	// LFU queue: twentytwo -> eighteen -> sixteen -> fifteen -> twentythree.
+	if _, ok := c.Get("twentyone"); ok {
+		t.Fatal("Cache.Get(_) = _, true, got _, false")
+	}
+	evictioncMock.HasEventuallyBeenCalledWith(t, "twentyone", 21, EvictionReasonMaxEntriesExceeded)
+	c.Set("twentyfour", 24, WithNoExpiration())
+	// LFU queue: twentytwo -> eighteen -> sixteen -> fifteen -> twentyfour.
+	if _, ok := c.Get("twentythree"); ok {
+		t.Fatal("Cache.Get(_) = _, true, got _, false")
+	}
+	evictioncMock.HasEventuallyBeenCalledWith(t, "twentythree", 23, EvictionReasonMaxEntriesExceeded)
+
+	// GetMultiple should update the entries frequency.
+	if got := c.GetMultiple("fifteen", "twentyfour"); len(got) != 2 {
+		t.Fatalf("len(Cache.GetMultiple(_)) = %d, want 2", len(got))
+	}
+	// LFU queue: fifteen -> twentyfour -> twentytwo -> eighteen -> sixteen.
+	c.Set("twentyfive", 25, WithNoExpiration())
+	// LFU queue: fifteen -> twentyfour -> twentytwo -> eighteen -> twentyfive.
+	if _, ok := c.Get("sixteen"); ok {
+		t.Fatal("Cache.Get(_) = _, true, got _, false")
+	}
+	evictioncMock.HasEventuallyBeenCalledWith(t, "sixteen", 16, EvictionReasonMaxEntriesExceeded)
+
+	// CompareAndSwap should update the entry frequency if swapped.
+	if swapped, present := c.CompareAndSwap("twentyfive", 25, 25, func(_, _ interface{}) bool { return true }, WithNoExpiration()); !present || !swapped {
+		t.Fatalf("Cache.CompareAndSwap(_, _, _, _, _) = %t, %t, want true, true", swapped, present)
+	}
+	// LFU queue: fifteen -> twentyfive -> twentyfour -> twentytwo -> eighteen.
+	c.Set("twentysix", 26, WithNoExpiration())
+	// LFU queue: fifteen -> twentyfive -> twentyfour -> twentytwo -> twentysix.
+	if _, ok := c.Get("eighteen"); ok {
+		t.Fatal("Cache.Get(_) = _, true, got _, false")
+	}
+	evictioncMock.HasEventuallyBeenCalledWith(t, "eighteen", 18, EvictionReasonMaxEntriesExceeded)
+
+	// CompareAndSwap should update the entry frequency if not swapped.
+	if swapped, present := c.CompareAndSwap("twentysix", 26, 26, func(_, _ interface{}) bool { return false }, WithNoExpiration()); swapped || !present {
+		t.Fatalf("Cache.CompareAndSwap(_, _, _, _, _) = %t, %t, want false, true", swapped, present)
+	}
+	// LFU queue: fifteen -> twentysix -> twentyfive -> twentyfour -> twentytwo.
+	c.Set("twentyseven", 27, WithNoExpiration())
+	// LFU queue: fifteen -> twentysix -> twentyfive -> twentyfour -> twentyseven.
+	if _, ok := c.Get("twentytwo"); ok {
+		t.Fatal("Cache.Get(_) = _, true, got _, false")
+	}
+	evictioncMock.HasEventuallyBeenCalledWith(t, "twentytwo", 22, EvictionReasonMaxEntriesExceeded)
 }
 
 func TestCache_MaxEntriesLimit_LessOrEqual0(t *testing.T) {
-	c := New(WithMaxEntriesOption[string, string](0))
-	if _, ok := c.queue.(*nopEvictionQueue[string, string]); !ok {
-		t.Error("Cache.queue = _, want *nopq")
+	c := New(WithMaxEntriesLimitOption[string, string](0, EvictionPolicyLRU))
+	if _, ok := c.queue.(nopEvictionQueue[string, string]); !ok {
+		t.Error("Cache.queue = _, want nopEvictionQueue")
 	}
 }
 
@@ -1799,13 +2173,13 @@ func TestImcache_LongRunning_EvictionCallback(t *testing.T) {
 		{
 			name: "Cache",
 			create: func(ec EvictionCallback[string, string]) imcache[string, string] {
-				return New[string, string](WithEvictionCallbackOption[string, string](ec), WithMaxEntriesOption[string, string](2))
+				return New[string, string](WithEvictionCallbackOption[string, string](ec), WithMaxEntriesLimitOption[string, string](2, EvictionPolicyLRU))
 			},
 		},
 		{
 			name: "Sharded",
 			create: func(ec EvictionCallback[string, string]) imcache[string, string] {
-				return NewSharded[string, string](2, DefaultStringHasher64{}, WithEvictionCallbackOption[string, string](ec), WithMaxEntriesOption[string, string](2))
+				return NewSharded[string, string](2, DefaultStringHasher64{}, WithEvictionCallbackOption[string, string](ec), WithMaxEntriesLimitOption[string, string](2, EvictionPolicyLRU))
 			},
 		},
 	}
@@ -1839,7 +2213,7 @@ func TestSharded_ReplaceKey_LongRunning_EvictionCallback_MaxEntriesLimit(t *test
 	ecDoneCh := make(chan struct{})
 	ec := &longRunningEvictionCallback{done: ecDoneCh}
 	defer func() { close(ecDoneCh) }()
-	c := NewSharded[string, string](2, DefaultStringHasher64{}, WithEvictionCallbackOption[string, string](ec.Callback), WithMaxEntriesOption[string, string](1))
+	c := NewSharded[string, string](2, DefaultStringHasher64{}, WithEvictionCallbackOption[string, string](ec.Callback), WithMaxEntriesLimitOption[string, string](1, EvictionPolicyLRU))
 	c.Set("foo1", "bar", WithNoExpiration())
 	c.Set("foo2", "bar", WithNoExpiration())
 	done := make(chan struct{})
