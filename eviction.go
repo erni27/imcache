@@ -225,9 +225,7 @@ func (q *lfuLruEvictionQueue[K, V]) remove(n *lfuNode[K, V]) {
 
 func (q *lfuLruEvictionQueue[K, V]) pop() *lfuNode[K, V] {
 	n := q.tail
-	if n != nil {
-		q.remove(n)
-	}
+	q.remove(n)
 	return n
 }
 
