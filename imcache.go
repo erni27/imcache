@@ -28,12 +28,16 @@ func New[K comparable, V any](opts ...Option[K, V]) *Cache[K, V] {
 }
 
 func newCache[K comparable, V any](opts options[K, V]) *Cache[K, V] {
+	var limit int
+	if opts.maxEntriesLimit > 0 {
+		limit = opts.maxEntriesLimit
+	}
 	c := &Cache[K, V]{
-		m:          make(map[K]node[K, V]),
+		m:          make(map[K]node[K, V], limit),
 		onEviction: opts.onEviction,
 		defaultExp: opts.defaultExp,
 		sliding:    opts.sliding,
-		limit:      opts.maxEntriesLimit,
+		limit:      limit,
 		policy:     opts.evictionPolicy,
 		queue:      newEvictionQueue[K, V](opts.maxEntriesLimit, opts.evictionPolicy),
 	}
@@ -555,7 +559,7 @@ func (c *Cache[K, V]) removeAll(now time.Time) {
 		return
 	}
 	removed := c.m
-	c.m = make(map[K]node[K, V])
+	c.m = make(map[K]node[K, V], c.limit)
 	c.queue = newEvictionQueue[K, V](c.limit, c.policy)
 	c.mu.Unlock()
 	if c.onEviction != nil && len(removed) != 0 {
