@@ -1,5 +1,7 @@
 package imcache
 
+import "math/rand"
+
 // EvictionPolicy represents the eviction policy.
 type EvictionPolicy int32
 
@@ -8,6 +10,9 @@ const (
 	EvictionPolicyLRU EvictionPolicy = iota + 1
 	// EvictionPolicyLFU is the least frequently used eviction policy.
 	EvictionPolicyLFU
+	// EvictionPolicyRandom is the random eviction policy.
+	// It evicts the entry randomly when the max entries limit exceeded.
+	EvictionPolicyRandom
 )
 
 // EvictionReason is the reason why an entry was evicted.
@@ -73,6 +78,9 @@ func newEvictionQueue[K comparable, V any](limit int, policy EvictionPolicy) evi
 		return &lruEvictionQueue[K, V]{}
 	case EvictionPolicyLFU:
 		return &lfuEvictionQueue[K, V]{freqs: make(map[int]*lfuLruEvictionQueue[K, V])}
+	case EvictionPolicyRandom:
+		var q randomEvictionQueue[K, V] = make([]*randomNode[K, V], 0, limit)
+		return &q
 	}
 	return nopEvictionQueue[K, V]{}
 }
@@ -317,6 +325,50 @@ func (q *lfuEvictionQueue[K, V]) touchall() {
 		q.freqs[lruq.freq] = lruq
 	}
 }
+
+//lint:ignore U1000 false positive
+type randomNode[K comparable, V any] struct {
+	entr entry[K, V]
+	idx  int
+}
+
+func (n *randomNode[K, V]) entry() entry[K, V] {
+	return n.entr
+}
+
+func (n *randomNode[K, V]) setEntry(e entry[K, V]) {
+	n.entr = e
+}
+
+//lint:ignore U1000 false positive
+type randomEvictionQueue[K comparable, V any] []*randomNode[K, V]
+
+func (q *randomEvictionQueue[K, V]) add(e entry[K, V]) node[K, V] {
+	n := &randomNode[K, V]{entr: e}
+	*q = append(*q, n)
+	n.idx = len(*q) - 1
+	return n
+}
+
+func (q *randomEvictionQueue[K, V]) remove(n node[K, V]) {
+	randn := n.(*randomNode[K, V])
+	updated := *q
+	updated[randn.idx], updated[len(updated)-1] = updated[len(updated)-1], updated[randn.idx]
+	updated[randn.idx].idx = randn.idx
+	updated = updated[:len(updated)-1]
+	*q = updated
+}
+
+func (q *randomEvictionQueue[K, V]) pop() node[K, V] {
+	idx := rand.Intn(len(*q))
+	n := (*q)[idx]
+	q.remove(n)
+	return n
+}
+
+func (randomEvictionQueue[K, V]) touch(node[K, V]) {}
+
+func (randomEvictionQueue[K, V]) touchall() {}
 
 //lint:ignore U1000 false positive
 type nopNode[K comparable, V any] entry[K, V]
