@@ -16,6 +16,8 @@ var random = rand.New(rand.NewSource(time.Now().UnixNano()))
 type imcache[K comparable, V any] interface {
 	Get(key K) (v V, present bool)
 	GetMultiple(key ...K) map[K]V
+	GetAll() map[K]V
+	Peek(key K) (v V, present bool)
 	Set(key K, val V, exp Expiration)
 	GetOrSet(key K, val V, exp Expiration) (v V, present bool)
 	Replace(key K, val V, exp Expiration) (present bool)
@@ -25,7 +27,6 @@ type imcache[K comparable, V any] interface {
 	Remove(key K) (present bool)
 	RemoveAll()
 	RemoveExpired()
-	GetAll() map[K]V
 	Len() int
 	Close()
 }
@@ -204,6 +205,66 @@ func TestImcache_GetMultiple_SlidingExpiration(t *testing.T) {
 			time.Sleep(500 * time.Millisecond)
 			if got := c.GetMultiple("foo", "bar", "foobar"); got == nil || len(got) != 0 {
 				t.Errorf("imcache.GetMultiple(_) = %v, want empty", got)
+			}
+		})
+	}
+}
+
+func TestImcache_Peek(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(imcache[string, string])
+		key   string
+		want  string
+		ok    bool
+	}{
+		{
+			name: "exists",
+			setup: func(c imcache[string, string]) {
+				c.Set("foo", "bar", WithNoExpiration())
+			},
+			key:  "foo",
+			want: "bar",
+			ok:   true,
+		},
+		{
+			name:  "not found",
+			setup: func(_ imcache[string, string]) {},
+		},
+		{
+			name: "entry expired",
+			setup: func(c imcache[string, string]) {
+				c.Set("foo", "bar", WithExpiration(time.Nanosecond))
+				time.Sleep(time.Nanosecond)
+			},
+			key: "foo",
+		},
+	}
+	for _, cache := range caches {
+		for _, tt := range tests {
+			t.Run(cache.name+" "+tt.name, func(t *testing.T) {
+				c := cache.create()
+				tt.setup(c)
+				if got, ok := c.Peek(tt.key); ok != tt.ok || got != tt.want {
+					t.Errorf("imcache.Peek(%s) = %v, %t want %v, %t", tt.key, got, ok, tt.want, tt.ok)
+				}
+			})
+		}
+	}
+}
+
+func TestImcache_Peek_SlidingExpiration(t *testing.T) {
+	for _, cache := range caches {
+		t.Run(cache.name, func(t *testing.T) {
+			c := cache.create()
+			c.Set("foo", "foo", WithSlidingExpiration(500*time.Millisecond))
+			time.Sleep(300 * time.Millisecond)
+			if _, ok := c.Peek("foo"); !ok {
+				t.Fatal("got imcache.Peek(_) = _, false, want _, true")
+			}
+			time.Sleep(300 * time.Millisecond)
+			if _, ok := c.Peek("foo"); ok {
+				t.Fatal("got imcache.Peek(_) = _, true, want _, false")
 			}
 		})
 	}
@@ -1016,6 +1077,9 @@ func TestImcache_Close(t *testing.T) {
 			if got := c.GetMultiple("foo", "bar"); got != nil {
 				t.Errorf("imcache.GetMultiple(_) = %v, want %v", got, nil)
 			}
+			if _, ok := c.Peek("foo"); ok {
+				t.Error("imcache.Peek(_) = _, ok, want _, false")
+			}
 			v, ok := c.GetOrSet("foo", "bar", WithNoExpiration())
 			if ok {
 				t.Error("imcache.GetOrSet(_, _, _) = _, true, want _, false")
@@ -1112,6 +1176,23 @@ func TestImcache_GetMultiple_EvictionCallback(t *testing.T) {
 				t.Errorf("imcache.GetMultiple(_) = %v, want empty", got)
 			}
 			evictionMock.HasEventuallyBeenCalledWith(t, "foobar", "foobar", EvictionReasonExpired)
+		})
+	}
+}
+
+func TestImcache_Peek_EvictionCallback(t *testing.T) {
+	evictioncMock := &evictionCallbackMock[string, string]{}
+	for _, cache := range cachesWithEvictionCallback {
+		t.Run(cache.name, func(t *testing.T) {
+			defer evictioncMock.Reset()
+			c := cache.create(evictioncMock.Callback)
+			c.Set("foo", "foo", WithExpiration(time.Nanosecond))
+			time.Sleep(time.Nanosecond)
+			if _, ok := c.Peek("foo"); ok {
+				t.Fatal("got imcache.Peek(_) = _, true, want _, false")
+			}
+			evictioncMock.HasNotBeenCalledWith(t, "foo", "foo", EvictionReasonExpired)
+			evictioncMock.HasEventuallyBeenCalledTimes(t, 0)
 		})
 	}
 }
@@ -1393,6 +1474,10 @@ func TestCache_MaxEntriesLimit_EvictionPolicyLRU(t *testing.T) {
 			if _, ok := c.Get("two"); !ok {
 				t.Fatal("want Cache.Get(_) = _, true, got _, false")
 			}
+			// Peek shouldn't move the entry to the front of the queue.
+			if _, ok := c.Peek("three"); !ok {
+				t.Fatal("want Cache.Peek(_) = _, true, got _, false")
+			}
 			// LRU queue: two -> six -> five -> four -> three.
 			c.Set("seven", 7, WithNoExpiration())
 			// LRU queue: seven -> two -> six -> five -> four.
@@ -1658,6 +1743,10 @@ func TestCache_MaxEntriesLimit_EvictionPolicyLFU(t *testing.T) {
 				t.Fatal("want Cache.Get(_) = _, true, got _, false")
 			}
 			// LFU queue: two -> six -> five -> four -> three.
+			// Peek shouldn't update the entry frequency.
+			if _, ok := c.Peek("three"); !ok {
+				t.Fatal("want Cache.Peek(_) = _, true, got _, false")
+			}
 			c.Set("seven", 7, WithExpiration(time.Nanosecond))
 			// LFU queue: two -> six -> five -> four -> seven.
 			evicted(t, "three", 3, EvictionReasonMaxEntriesExceeded)
@@ -1775,6 +1864,62 @@ func TestCache_MaxEntriesLimit_EvictionPolicyLFU(t *testing.T) {
 	}
 }
 
+func TestSharded_ReplaceKey_MaxEntriesLimit_EvictionPolicyLFU(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func() (*Sharded[int, int], func(*testing.T, int, int, EvictionReason))
+	}{
+		{
+			name: "no eviction callback",
+			setup: func() (*Sharded[int, int], func(*testing.T, int, int, EvictionReason)) {
+				s := NewSharded[int, int](2, hasher{}, WithMaxEntriesLimitOption[int, int](2, EvictionPolicyLFU))
+				return s, AssertEntryEvictedFunc[int, int](s, nil)
+			},
+		},
+		{
+			name: "eviction callback",
+			setup: func() (*Sharded[int, int], func(*testing.T, int, int, EvictionReason)) {
+				mcallback := &evictionCallbackMock[int, int]{}
+				s := NewSharded[int, int](2, hasher{}, WithMaxEntriesLimitOption[int, int](2, EvictionPolicyLFU), WithEvictionCallbackOption(mcallback.Callback))
+				return s, AssertEntryEvictedFunc[int, int](s, mcallback)
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, evicted := tt.setup()
+
+			s.Set(1, 1, WithNoExpiration())
+			s.Set(2, 2, WithNoExpiration())
+			s.Set(3, 3, WithNoExpiration())
+			s.Set(4, 4, WithNoExpiration())
+			if ok := s.ReplaceKey(4, 5, WithExpiration(50*time.Millisecond)); !ok {
+				t.Fatal("Sharded.ReplaceKey(_, _, _) = false, want true")
+			}
+			evicted(t, 4, 4, EvictionReasonKeyReplaced)
+			evicted(t, 1, 1, EvictionReasonMaxEntriesExceeded)
+			if _, ok := s.Get(3); !ok {
+				t.Fatal("Sharded.Get(_) = _, false, want _, true")
+			}
+			if _, ok := s.Get(3); !ok {
+				t.Fatal("Sharded.Get(_) = _, false, want _, true")
+			}
+			if _, ok := s.Get(5); !ok {
+				t.Fatal("Sharded.Get(_) = _, false, want _, true")
+			}
+			time.Sleep(50 * time.Millisecond)
+			if ok := s.ReplaceKey(2, 7, WithNoExpiration()); !ok {
+				t.Fatal("Sharded.ReplaceKey(_, _, _) = false, want true")
+			}
+			evicted(t, 2, 2, EvictionReasonKeyReplaced)
+			evicted(t, 5, 4, EvictionReasonExpired)
+			if _, ok := s.Get(3); !ok {
+				t.Fatal("Sharded.Get(_) = _, false, want _, true")
+			}
+		})
+	}
+}
+
 func TestCache_MaxEntriesLimit_EvictionPolicyRandom(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -1844,62 +1989,6 @@ func TestCache_MaxEntriesLimit_EvictionPolicyRandom(t *testing.T) {
 				t.Fatal("Cache.GetOrSet(_, _, _) = _, true, want _, false")
 			}
 			evicted(t, 5, 6)
-		})
-	}
-}
-
-func TestSharded_ReplaceKey_MaxEntriesLimit_EvictionPolicyLFU(t *testing.T) {
-	tests := []struct {
-		name  string
-		setup func() (*Sharded[int, int], func(*testing.T, int, int, EvictionReason))
-	}{
-		{
-			name: "no eviction callback",
-			setup: func() (*Sharded[int, int], func(*testing.T, int, int, EvictionReason)) {
-				s := NewSharded[int, int](2, hasher{}, WithMaxEntriesLimitOption[int, int](2, EvictionPolicyLFU))
-				return s, AssertEntryEvictedFunc[int, int](s, nil)
-			},
-		},
-		{
-			name: "eviction callback",
-			setup: func() (*Sharded[int, int], func(*testing.T, int, int, EvictionReason)) {
-				mcallback := &evictionCallbackMock[int, int]{}
-				s := NewSharded[int, int](2, hasher{}, WithMaxEntriesLimitOption[int, int](2, EvictionPolicyLFU), WithEvictionCallbackOption(mcallback.Callback))
-				return s, AssertEntryEvictedFunc[int, int](s, mcallback)
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			s, evicted := tt.setup()
-
-			s.Set(1, 1, WithNoExpiration())
-			s.Set(2, 2, WithNoExpiration())
-			s.Set(3, 3, WithNoExpiration())
-			s.Set(4, 4, WithNoExpiration())
-			if ok := s.ReplaceKey(4, 5, WithExpiration(50*time.Millisecond)); !ok {
-				t.Fatal("Sharded.ReplaceKey(_, _, _) = false, want true")
-			}
-			evicted(t, 4, 4, EvictionReasonKeyReplaced)
-			evicted(t, 1, 1, EvictionReasonMaxEntriesExceeded)
-			if _, ok := s.Get(3); !ok {
-				t.Fatal("Sharded.Get(_) = _, false, want _, true")
-			}
-			if _, ok := s.Get(3); !ok {
-				t.Fatal("Sharded.Get(_) = _, false, want _, true")
-			}
-			if _, ok := s.Get(5); !ok {
-				t.Fatal("Sharded.Get(_) = _, false, want _, true")
-			}
-			time.Sleep(50 * time.Millisecond)
-			if ok := s.ReplaceKey(2, 7, WithNoExpiration()); !ok {
-				t.Fatal("Sharded.ReplaceKey(_, _, _) = false, want true")
-			}
-			evicted(t, 2, 2, EvictionReasonKeyReplaced)
-			evicted(t, 5, 4, EvictionReasonExpired)
-			if _, ok := s.Get(3); !ok {
-				t.Fatal("Sharded.Get(_) = _, false, want _, true")
-			}
 		})
 	}
 }
