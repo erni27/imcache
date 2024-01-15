@@ -258,7 +258,6 @@ func (c *Cache[K, V]) Peek(key K) (V, bool) {
 	}
 	n, ok := c.m[key]
 	if !ok || n.entry().expired(now) {
-		var zero V
 		return zero, false
 	}
 	return n.entry().val, true
