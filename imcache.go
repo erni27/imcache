@@ -126,11 +126,15 @@ func (c *Cache[K, V]) Get(key K) (V, bool) {
 }
 
 // GetMultiple returns the values for the given keys.
-// If the Cache is not closed, then the returned map is always non-nil.
+// If the Cache is not closed, then the returned map
+// is always a non-nil one.
 //
 // If it encounters an expired entry, the expired entry is evicted.
 func (c *Cache[K, V]) GetMultiple(keys ...K) map[K]V {
-	now := time.Now()
+	return c.getMultiple(time.Now(), keys...)
+}
+
+func (c *Cache[K, V]) getMultiple(now time.Time, keys ...K) map[K]V {
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
@@ -261,6 +265,35 @@ func (c *Cache[K, V]) Peek(key K) (V, bool) {
 		return zero, false
 	}
 	return n.entry().val, true
+}
+
+// PeekMultiple returns the values for the given keys without
+// actively evicting the encountered entry if it is expired and
+// updating the entry's sliding expiration.
+// If the Cache is not closed, then the returned map
+// is always a non-nil one.
+//
+// If the max entries limit is set, it doesn't update
+// the encountered entry's position in the eviction queue.
+func (c *Cache[K, V]) PeekMultiple(keys ...K) map[K]V {
+	return c.peekMultiple(time.Now(), keys...)
+}
+
+func (c *Cache[K, V]) peekMultiple(now time.Time, keys ...K) map[K]V {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.closed {
+		return nil
+	}
+	got := make(map[K]V, len(keys))
+	for _, key := range keys {
+		node, ok := c.m[key]
+		if !ok || node.entry().expired(now) {
+			continue
+		}
+		got[key] = node.entry().val
+	}
+	return got
 }
 
 // Set sets the value for the given key.
@@ -829,20 +862,23 @@ func (s *Sharded[K, V]) Get(key K) (value V, present bool) {
 }
 
 // GetMultiple returns the values for the given keys.
-// If the Sharded is not closed, then the returned map is always non-nil.
+// If the Sharded is not closed, then the returned map
+// is always a non-nil one.
 //
 // If it encounters an expired entry, the expired entry is evicted.
 func (s *Sharded[K, V]) GetMultiple(keys ...K) map[K]V {
-	shardsIndices := make(map[int][]K)
+	now := time.Now()
+	keysByShard := make(map[int][]K)
 	for _, key := range keys {
-		shardsIndices[s.shardIndex(key)] = append(shardsIndices[s.shardIndex(key)], key)
+		idx := s.shardIndex(key)
+		keysByShard[idx] = append(keysByShard[idx], key)
 	}
-	ms := make([]map[K]V, len(shardsIndices))
+	ms := make([]map[K]V, len(keysByShard))
 	var n int
-	for shardIndex, keys := range shardsIndices {
-		m := s.shards[shardIndex].GetMultiple(keys...)
+	for idx, keys := range keysByShard {
+		m := s.shards[idx].getMultiple(now, keys...)
 		if m == nil {
-			// GetMultiple returns nil if the shard is closed.
+			// getMultiple returns nil if the shard is closed.
 			// If the shard is closed, then the Sharded is closed too.
 			return nil
 		}
@@ -892,6 +928,42 @@ func (s *Sharded[K, V]) GetAll() map[K]V {
 // the entry's position in the eviction queue.
 func (s *Sharded[K, V]) Peek(key K) (V, bool) {
 	return s.shard(key).Peek(key)
+}
+
+// PeekMultiple returns the values for the given keys without
+// actively evicting the encountered entry if it is expired and
+// updating the entry's sliding expiration.
+// If the Sharded is not closed, then the returned map
+// is always a non-nil one.
+//
+// If the max entries limit is set, it doesn't update
+// the encountered entry's position in the eviction queue.
+func (s *Sharded[K, V]) PeekMultiple(keys ...K) map[K]V {
+	now := time.Now()
+	keysByShard := make(map[int][]K)
+	for _, key := range keys {
+		idx := s.shardIndex(key)
+		keysByShard[idx] = append(keysByShard[idx], key)
+	}
+	ms := make([]map[K]V, len(keysByShard))
+	var n int
+	for idx, keys := range keysByShard {
+		m := s.shards[idx].peekMultiple(now, keys...)
+		if m == nil {
+			// peekMultiple returns nil if the shard is closed.
+			// If the shard is closed, then the Sharded is closed too.
+			return nil
+		}
+		ms = append(ms, m)
+		n += len(m)
+	}
+	result := make(map[K]V, n)
+	for _, m := range ms {
+		for k, v := range m {
+			result[k] = v
+		}
+	}
+	return result
 }
 
 // Set sets the value for the given key.
