@@ -77,7 +77,7 @@ type Cache[K comparable, V any] struct {
 	defaultExp time.Duration
 	policy     EvictionPolicy
 	limit      int
-	mu         sync.Mutex
+	mu         sync.RWMutex
 	sliding    bool
 	closed     bool
 }
@@ -183,6 +183,85 @@ func (c *Cache[K, V]) GetMultiple(keys ...K) map[K]V {
 		}
 	}()
 	return got
+}
+
+// GetAll returns a copy of all entries in the cache.
+//
+// If it encounters an expired entry, the expired entry is evicted.
+func (c *Cache[K, V]) GetAll() map[K]V {
+	return c.getAll(time.Now())
+}
+
+func (c *Cache[K, V]) getAll(now time.Time) map[K]V {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return nil
+	}
+	// To avoid copying the expired entries if there's no eviction callback.
+	if c.onEviction == nil {
+		got := make(map[K]V, len(c.m))
+		for key, node := range c.m {
+			entry := node.entry()
+			if entry.expired(now) {
+				c.queue.remove(node)
+				delete(c.m, key)
+				continue
+			}
+			entry.slide(now)
+			node.setEntry(entry)
+			got[key] = entry.val
+		}
+		c.queue.touchall()
+		c.mu.Unlock()
+		return got
+	}
+	var expired []entry[K, V]
+	got := make(map[K]V, len(c.m))
+	for key, node := range c.m {
+		entry := node.entry()
+		if entry.expired(now) {
+			expired = append(expired, entry)
+			delete(c.m, key)
+			c.queue.remove(node)
+			continue
+		}
+		entry.slide(now)
+		node.setEntry(entry)
+		got[key] = entry.val
+	}
+	c.queue.touchall()
+	c.mu.Unlock()
+	if len(expired) != 0 {
+		go func() {
+			for _, kv := range expired {
+				c.onEviction(kv.key, kv.val, EvictionReasonExpired)
+			}
+		}()
+	}
+	return got
+}
+
+// Peek returns the value for the given key without
+// actively evicting the entry if it is expired and
+// updating the entry's sliding expiration.
+//
+// If the max entries limit is set, it doesn't update
+// the entry's position in the eviction queue.
+func (c *Cache[K, V]) Peek(key K) (V, bool) {
+	now := time.Now()
+	var zero V
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.closed {
+		return zero, false
+	}
+	n, ok := c.m[key]
+	if !ok || n.entry().expired(now) {
+		var zero V
+		return zero, false
+	}
+	return n.entry().val, true
 }
 
 // Set sets the value for the given key.
@@ -620,63 +699,6 @@ func (c *Cache[K, V]) removeExpired(now time.Time) {
 	}
 }
 
-// GetAll returns a copy of all entries in the cache.
-//
-// If it encounters an expired entry, the expired entry is evicted.
-func (c *Cache[K, V]) GetAll() map[K]V {
-	return c.getAll(time.Now())
-}
-
-func (c *Cache[K, V]) getAll(now time.Time) map[K]V {
-	c.mu.Lock()
-	if c.closed {
-		c.mu.Unlock()
-		return nil
-	}
-	// To avoid copying the expired entries if there's no eviction callback.
-	if c.onEviction == nil {
-		got := make(map[K]V, len(c.m))
-		for key, node := range c.m {
-			entry := node.entry()
-			if entry.expired(now) {
-				c.queue.remove(node)
-				delete(c.m, key)
-				continue
-			}
-			entry.slide(now)
-			node.setEntry(entry)
-			got[key] = entry.val
-		}
-		c.queue.touchall()
-		c.mu.Unlock()
-		return got
-	}
-	var expired []entry[K, V]
-	got := make(map[K]V, len(c.m))
-	for key, node := range c.m {
-		entry := node.entry()
-		if entry.expired(now) {
-			expired = append(expired, entry)
-			delete(c.m, key)
-			c.queue.remove(node)
-			continue
-		}
-		entry.slide(now)
-		node.setEntry(entry)
-		got[key] = entry.val
-	}
-	c.queue.touchall()
-	c.mu.Unlock()
-	if len(expired) != 0 {
-		go func() {
-			for _, kv := range expired {
-				c.onEviction(kv.key, kv.val, EvictionReasonExpired)
-			}
-		}()
-	}
-	return got
-}
-
 // Len returns the number of entries in the cache.
 func (c *Cache[K, V]) Len() int {
 	c.mu.Lock()
@@ -835,6 +857,42 @@ func (s *Sharded[K, V]) GetMultiple(keys ...K) map[K]V {
 		}
 	}
 	return result
+}
+
+// GetAll returns a copy of all entries in the cache.
+//
+// If it encounters an expired entry, the expired entry is evicted.
+func (s *Sharded[K, V]) GetAll() map[K]V {
+	now := time.Now()
+	var n int
+	ms := make([]map[K]V, 0, len(s.shards))
+	for _, shard := range s.shards {
+		m := shard.getAll(now)
+		// If Cache.getAll returns nil, it means that the shard is closed
+		// hence Sharded is closed too.
+		if m == nil {
+			return nil
+		}
+		n += len(m)
+		ms = append(ms, m)
+	}
+	all := make(map[K]V, n)
+	for _, m := range ms {
+		for key, val := range m {
+			all[key] = val
+		}
+	}
+	return all
+}
+
+// Peek returns the value for the given key without
+// actively evicting the entry if it is expired and
+// updating the entry's sliding expiration.
+//
+// If the max entries limit is set, it doesn't update
+// the entry's position in the eviction queue.
+func (s *Sharded[K, V]) Peek(key K) (V, bool) {
+	return s.shard(key).Peek(key)
 }
 
 // Set sets the value for the given key.
@@ -1028,32 +1086,6 @@ func (s *Sharded[K, V]) RemoveExpired() {
 	for _, shard := range s.shards {
 		shard.removeExpired(now)
 	}
-}
-
-// GetAll returns a copy of all entries in the cache.
-//
-// If it encounters an expired entry, the expired entry is evicted.
-func (s *Sharded[K, V]) GetAll() map[K]V {
-	now := time.Now()
-	var n int
-	ms := make([]map[K]V, 0, len(s.shards))
-	for _, shard := range s.shards {
-		m := shard.getAll(now)
-		// If Cache.getAll returns nil, it means that the shard is closed
-		// hence Sharded is closed too.
-		if m == nil {
-			return nil
-		}
-		n += len(m)
-		ms = append(ms, m)
-	}
-	all := make(map[K]V, n)
-	for _, m := range ms {
-		for key, val := range m {
-			all[key] = val
-		}
-	}
-	return all
 }
 
 // Len returns the number of entries in the cache.

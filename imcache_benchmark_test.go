@@ -146,6 +146,40 @@ func BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyRandom(b *testing.B) {
 	}
 }
 
+func BenchmarkCache_Peek(b *testing.B) {
+	var c Cache[string, token]
+	for i := 0; i < b.N; i++ {
+		c.Set(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if v, ok := c.Peek(fmt.Sprintf("key-%d", random.Intn(b.N))); ok {
+			_ = v
+		}
+	}
+}
+
+func BenchmarkSharded_Peek(b *testing.B) {
+	for _, n := range []int{2, 4, 8, 16, 32, 64, 128} {
+		b.Run(fmt.Sprintf("%d_Shards", n), func(b *testing.B) {
+			c := NewSharded[string, token](n, DefaultStringHasher64{})
+			for i := 0; i < b.N; i++ {
+				c.Set(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if v, ok := c.Peek(fmt.Sprintf("key-%d", random.Intn(b.N))); ok {
+					_ = v
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkMap_Get(b *testing.B) {
 	m := make(map[string]token)
 	var mu sync.Mutex
@@ -309,6 +343,44 @@ func BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyRandom_Parallel(b *testi
 			b.RunParallel(func(pb *testing.PB) {
 				for pb.Next() {
 					if v, ok := c.Get(fmt.Sprintf("key-%d", random.Intn(b.N))); ok {
+						_ = (token)(v)
+					}
+				}
+			})
+		})
+	}
+}
+
+func BenchmarkCache_Peek_Parallel(b *testing.B) {
+	var c Cache[string, token]
+	for i := 0; i < b.N; i++ {
+		c.Set(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			if v, ok := c.Peek(fmt.Sprintf("key-%d", random.Intn(b.N))); ok {
+				_ = (token)(v)
+			}
+		}
+	})
+}
+
+func BenchmarkSharded_Peek_Parallel(b *testing.B) {
+	for _, n := range []int{2, 4, 8, 16, 32, 64, 128} {
+		b.Run(fmt.Sprintf("%d_Shards", n), func(b *testing.B) {
+			c := NewSharded[string, token](n, DefaultStringHasher64{})
+			for i := 0; i < b.N; i++ {
+				c.Set(fmt.Sprintf("key-%d", i), token{ID: i}, WithNoExpiration())
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.RunParallel(func(pb *testing.PB) {
+				for pb.Next() {
+					if v, ok := c.Peek(fmt.Sprintf("key-%d", random.Intn(b.N))); ok {
 						_ = (token)(v)
 					}
 				}
