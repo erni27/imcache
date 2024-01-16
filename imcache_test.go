@@ -1899,7 +1899,7 @@ func TestCache_MaxEntriesLimit_EvictionPolicyLFU(t *testing.T) {
 			// LFU queue: six -> five -> four -> three -> two.
 			evicted(t, "one", 1, EvictionReasonMaxEntriesExceeded)
 
-			// Get should update the frequencies.
+			// Get should update the entry frequency.
 			if _, ok := c.Get("two"); !ok {
 				t.Fatal("got Cache.Get(_) = _, false, want _, true")
 			}
@@ -1936,7 +1936,7 @@ func TestCache_MaxEntriesLimit_EvictionPolicyLFU(t *testing.T) {
 			// Replace should update the frequency of the entry if the entry already exists.
 			c.Set("eight", 8, WithNoExpiration())
 			// LFU queue: two -> eight -> six -> five -> four.
-			// PeekMultiple shouldn't update the entries frequency.
+			// PeekMultiple shouldn't update the frequencies.
 			want := map[string]int{"four": 4, "five": 5}
 			if got := c.PeekMultiple("four", "five"); !reflect.DeepEqual(got, want) {
 				t.Fatalf("got Cache.PeekMultiple(_) = %v, want %v", got, want)
