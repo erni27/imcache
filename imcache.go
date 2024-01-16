@@ -296,6 +296,32 @@ func (c *Cache[K, V]) peekMultiple(now time.Time, keys ...K) map[K]V {
 	return got
 }
 
+// PeekAll returns a copy of all entries in the cache without
+// actively evicting the encountered entry if it is expired and
+// updating the entry's sliding expiration.
+//
+// If the max entries limit is set, it doesn't update
+// the encountered entry's position in the eviction queue.
+func (c *Cache[K, V]) PeekAll() map[K]V {
+	return c.peekAll(time.Now())
+}
+
+func (c *Cache[K, V]) peekAll(now time.Time) map[K]V {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.closed {
+		return nil
+	}
+	got := make(map[K]V, len(c.m))
+	for key, node := range c.m {
+		if node.entry().expired(now) {
+			continue
+		}
+		got[key] = node.entry().val
+	}
+	return got
+}
+
 // Set sets the value for the given key.
 // If the entry already exists, it is replaced.
 //
@@ -964,6 +990,35 @@ func (s *Sharded[K, V]) PeekMultiple(keys ...K) map[K]V {
 		}
 	}
 	return result
+}
+
+// PeekAll returns a copy of all entries in the cache without
+// actively evicting the encountered entry if it is expired and
+// updating the entry's sliding expiration.
+//
+// If the max entries limit is set, it doesn't update
+// the encountered entry's position in the eviction queue.
+func (s *Sharded[K, V]) PeekAll() map[K]V {
+	now := time.Now()
+	var n int
+	ms := make([]map[K]V, 0, len(s.shards))
+	for _, shard := range s.shards {
+		m := shard.peekAll(now)
+		// If Cache.peekAll returns nil, it means that the shard is closed
+		// hence Sharded is closed too.
+		if m == nil {
+			return nil
+		}
+		n += len(m)
+		ms = append(ms, m)
+	}
+	all := make(map[K]V, n)
+	for _, m := range ms {
+		for key, val := range m {
+			all[key] = val
+		}
+	}
+	return all
 }
 
 // Set sets the value for the given key.

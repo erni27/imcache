@@ -19,6 +19,7 @@ type imcache[K comparable, V any] interface {
 	GetAll() map[K]V
 	Peek(key K) (v V, present bool)
 	PeekMultiple(keys ...K) map[K]V
+	PeekAll() map[K]V
 	Set(key K, val V, exp Expiration)
 	GetOrSet(key K, val V, exp Expiration) (v V, present bool)
 	Replace(key K, val V, exp Expiration) (present bool)
@@ -341,6 +342,48 @@ func TestImcache_PeekMultiple_SlidingExpiration(t *testing.T) {
 			want = make(map[string]string)
 			if got := c.PeekMultiple("foo", "bar"); !reflect.DeepEqual(got, want) {
 				t.Fatalf("got imcache.PeekMultiple(_) = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestImcache_PeekAll(t *testing.T) {
+	for _, cache := range caches {
+		t.Run(cache.name, func(t *testing.T) {
+			c := cache.create()
+			c.Set("foo", "foo", WithNoExpiration())
+			c.Set("foobar", "foobar", WithNoExpiration())
+			c.Set("barfoo", "barfoo", WithNoExpiration())
+			c.Set("bar", "bar", WithExpiration(time.Nanosecond))
+			time.Sleep(time.Nanosecond)
+			want := map[string]string{
+				"foo":    "foo",
+				"foobar": "foobar",
+				"barfoo": "barfoo",
+			}
+			if got := c.PeekAll(); !reflect.DeepEqual(got, want) {
+				t.Errorf("got imcache.PeekAll() = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestImcache_PeekAll_SlidingExpiration(t *testing.T) {
+	for _, cache := range caches {
+		t.Run(cache.name, func(t *testing.T) {
+			c := cache.create()
+			c.Set("foo", "foo", WithSlidingExpiration(500*time.Millisecond))
+			c.Set("bar", "bar", WithSlidingExpiration(400*time.Millisecond))
+			c.Set("foobar", "foobar", WithNoExpiration())
+			time.Sleep(300 * time.Millisecond)
+			want := map[string]string{"foo": "foo", "bar": "bar", "foobar": "foobar"}
+			if got := c.PeekAll(); !reflect.DeepEqual(got, want) {
+				t.Fatalf("got imcache.PeekAll() = %v, want %v", got, want)
+			}
+			time.Sleep(300 * time.Millisecond)
+			want = map[string]string{"foobar": "foobar"}
+			if got := c.PeekAll(); !reflect.DeepEqual(got, want) {
+				t.Fatalf("got imcache.PeekAll() = %v, want %v", got, want)
 			}
 		})
 	}
@@ -1159,6 +1202,9 @@ func TestImcache_Close(t *testing.T) {
 			if got := c.PeekMultiple("foo", "bar"); got != nil {
 				t.Errorf("imcache.PeekMultiple(_) = %v, want %v", got, nil)
 			}
+			if got := c.PeekAll(); got != nil {
+				t.Errorf("imcache.PeekAll() = %v, want %v", got, nil)
+			}
 			v, ok := c.GetOrSet("foo", "bar", WithNoExpiration())
 			if ok {
 				t.Error("imcache.GetOrSet(_, _, _) = _, true, want _, false")
@@ -1288,6 +1334,27 @@ func TestImcache_PeekMultiple_EvictionCallback(t *testing.T) {
 			want := make(map[string]string)
 			if got := c.PeekMultiple("foo"); !reflect.DeepEqual(got, want) {
 				t.Fatalf("got imcache.PeekMultiple(_) = %v, want %v", got, want)
+			}
+			evictioncMock.HasNotBeenCalledWith(t, "foo", "foo", EvictionReasonExpired)
+			evictioncMock.HasNotBeenCalledWith(t, "bar", "bar", EvictionReasonExpired)
+			evictioncMock.HasEventuallyBeenCalledTimes(t, 0)
+		})
+	}
+}
+
+func TestImcache_PeekAll_EvictionCallback(t *testing.T) {
+	evictioncMock := &evictionCallbackMock[string, string]{}
+	for _, cache := range cachesWithEvictionCallback {
+		t.Run(cache.name, func(t *testing.T) {
+			defer evictioncMock.Reset()
+			c := cache.create(evictioncMock.Callback)
+			c.Set("foo", "foo", WithExpiration(time.Nanosecond))
+			c.Set("bar", "bar", WithExpiration(time.Nanosecond))
+			c.Set("foobar", "foobar", WithNoExpiration())
+			time.Sleep(time.Nanosecond)
+			want := map[string]string{"foobar": "foobar"}
+			if got := c.PeekAll(); !reflect.DeepEqual(got, want) {
+				t.Fatalf("got imcache.PeekAll() = %v, want %v", got, want)
 			}
 			evictioncMock.HasNotBeenCalledWith(t, "foo", "foo", EvictionReasonExpired)
 			evictioncMock.HasNotBeenCalledWith(t, "bar", "bar", EvictionReasonExpired)
@@ -1631,6 +1698,11 @@ func TestCache_MaxEntriesLimit_EvictionPolicyLRU(t *testing.T) {
 			if _, ok := c.Get("nine"); !ok {
 				t.Fatal("got Cache.Get(_) = _, false, want _, true")
 			}
+			// PeekAll should not change the LRU queue.
+			want := map[string]int{"eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12}
+			if got := c.PeekAll(); !reflect.DeepEqual(got, want) {
+				t.Fatalf("got Cache.PeekAll() = %v, want %v", got, want)
+			}
 			// LRU queue: nine -> twelve -> eleven -> eight -> ten.
 			c.Set("thirteen", 13, WithNoExpiration())
 			// LRU queue: thirteen -> nine -> twelve -> eleven -> eight.
@@ -1649,7 +1721,7 @@ func TestCache_MaxEntriesLimit_EvictionPolicyLRU(t *testing.T) {
 				t.Fatal("got Cache.Get(_) = _, false, want _, true")
 			}
 			// PeekMultiple shouldn't move the entires to the front of the queue.
-			want := map[string]int{"fourteen": 14, "fifteen": 15}
+			want = map[string]int{"fourteen": 14, "fifteen": 15}
 			if got := c.PeekMultiple("fourteen", "fifteen"); !reflect.DeepEqual(got, want) {
 				t.Fatalf("got Cache.PeekMultiple(_) = %v, want %v", got, want)
 			}
@@ -1827,7 +1899,7 @@ func TestCache_MaxEntriesLimit_EvictionPolicyLFU(t *testing.T) {
 			// LFU queue: six -> five -> four -> three -> two.
 			evicted(t, "one", 1, EvictionReasonMaxEntriesExceeded)
 
-			// Get should update the entries frequency.
+			// Get should update the frequencies.
 			if _, ok := c.Get("two"); !ok {
 				t.Fatal("got Cache.Get(_) = _, false, want _, true")
 			}
@@ -1921,6 +1993,11 @@ func TestCache_MaxEntriesLimit_EvictionPolicyLFU(t *testing.T) {
 			c.GetAll()
 			// LFU queue: eighteen -> sixteen -> fifteen.
 			c.Set("twenty", 20, WithNoExpiration())
+			// PeekAll shouldn't update the entries frequency.
+			want = map[string]int{"fifteen": 15, "sixteen": 16, "eighteen": 18, "twenty": 20}
+			if got := c.PeekAll(); !reflect.DeepEqual(got, want) {
+				t.Fatalf("got Cache.PeekAll() = %v, want %v", got, want)
+			}
 			// LFU queue: eighteen -> sixteen -> fifteen -> twenty.
 			c.Set("twentyone", 21, WithNoExpiration())
 			// LFU queue: eighteen -> sixteen -> fifteen -> twentyone -> twenty.
