@@ -11,8 +11,6 @@ import (
 	"time"
 )
 
-var random = rand.New(rand.NewSource(time.Now().UnixNano()))
-
 type imcache[K comparable, V any] interface {
 	Get(key K) (v V, present bool)
 	GetMultiple(keys ...K) map[K]V
@@ -44,7 +42,7 @@ var caches = []struct {
 		name: "Cache",
 		create: func() imcache[string, string] {
 			// Randomly test both zero value and initialized Cache.
-			if random.Intn(2) == 1 {
+			if rand.Intn(2) == 1 {
 				return New[string, string]()
 			}
 			return &Cache[string, string]{}
@@ -54,7 +52,7 @@ var caches = []struct {
 		name: "Sharded",
 		create: func() imcache[string, string] {
 			// Randomly test different number of shards.
-			shards := random.Intn(10) + 1
+			shards := rand.Intn(10) + 1
 			return NewSharded[string, string](shards, DefaultStringHasher64{})
 		},
 	},
@@ -915,7 +913,7 @@ func TestImcache_Len(t *testing.T) {
 	for _, cache := range caches {
 		t.Run(cache.name, func(t *testing.T) {
 			c := cache.create()
-			n := 1000 + random.Intn(1000)
+			n := 1000 + rand.Intn(1000)
 			for i := 0; i < n; i++ {
 				c.Set(strconv.Itoa(i), fmt.Sprintf("test-%d", i), WithNoExpiration())
 			}
