@@ -30,9 +30,7 @@ func main() {
 	// with no expiration, no sliding expiration,
 	// no entry limit and no eviction callback.
 	var c imcache.Cache[uint32, string]
-	// Set a new value with no expiration time.
 	c.Set(1, "one", imcache.WithNoExpiration())
-	// Get the value for the key 1.
 	value, ok := c.Get(1)
 	if !ok {
 		panic("value for the key '1' not found")
@@ -43,47 +41,45 @@ func main() {
 
 ### Expiration
 
-`imcache` supports no expiration, absolute expiration and sliding expiration.
+`imcache` supports the following expiration options:
 
-* No expiration means that the entry will never expire.
-* Absolute expiration means that the entry will expire after a certain time.
-* Sliding expiration means that the entry will expire after a certain time if it hasn't been accessed. The expiration time is reset every time the entry is accessed. In other words the expiration time is slided to now + sliding expiration time when now is the time when the entry was accessed (read or write).
+* `WithNoExpiration` - the entry will never expire.
+* `WithExpiration` - the entry will expire after a certain time.
+* `WithExpirationDate` - the entry will expire at a certain date.
+* `WithSlidingExpiration` - the entry will expire after a certain time if it hasn't been accessed. The expiration time is reset every time the entry is accessed. It is slided to now + sliding expiration time when now is the time when the entry was accessed.
 
 ```go
-// Set a new value with no expiration time.
 // The entry will never expire.
 c.Set(1, "one", imcache.WithNoExpiration())
-// Set a new value with an absolute expiration time set to 1 second from now.
 // The entry will expire after 1 second.
 c.Set(2, "two", imcache.WithExpiration(time.Second))
-// Set a new value with an absolute expiration time set to a specific date.
 // The entry will expire at the given date.
 c.Set(3, "three", imcache.WithExpirationDate(time.Now().Add(time.Second)))
-// Set a new value with a sliding expiration time.
-// If the entry hasn't been accessed in the last 1 second, it will be evicted,
-// otherwise the expiration time will be extended by 1 second from the last access time.
+// The entry will expire after 1 second if it hasn't been accessed.
+// Otherwise, the expiration time will slide to the access time + 1 second.
 c.Set(4, "four", imcache.WithSlidingExpiration(time.Second))
 ```
 
-If you want to use default expiration time for the given cache instance, you can use the `WithDefaultExpiration` `Expiration` option. By default, the expiration time is set to no expiration. You can set the default expiration time when creating a new `Cache` or `Sharded` instance. More on sharding can be found in the [Sharding](#sharding) section.
+One can also use the `WithExpirationOption` and `WithSlidingExpirationOption` options to set the default expiration time for the given cache instance. By default, the default expiration time is set to no expiration.
 
 ```go
-// Create a new non-sharded cache instance with default absolute expiration time equal to 1 second.
+// Create a new cache instance with the default expiration time equal to 1 second.
 c1 := imcache.New[int32, string](imcache.WithDefaultExpirationOption[int32, string](time.Second))
-// Set a new value with default expiration time (absolute).
+// The entry will expire after 1 second (the default expiration time).
 c1.Set(1, "one", imcache.WithDefaultExpiration())
 
-// Create a new non-sharded cache instance with default sliding expiration time equal to 1 second.
+// Create a new cache instance with the default sliding expiration time equal to 1 second.
 c2 := imcache.New[int32, string](imcache.WithDefaultSlidingExpirationOption[int32, string](time.Second))
-// Set a new value with default expiration time (sliding).
+// The entry will expire after 1 second (the default expiration time) if it hasn't been accessed.
+// Otherwise, the expiration time will slide to the access time + 1 second.
 c2.Set(1, "one", imcache.WithDefaultExpiration())
 ```
 
 ### Key eviction
 
-`imcache` follows very naive and simple eviction approach. If an expired entry is accessed by any `Cache` method, it is removed from the cache. The exception is the max entries limit. If the max entries limit is set, the cache  evicts the least recently used entry when the max entries limit is reached regardless of its expiration time. More on limiting the max number of entries in the cache can be found in the [Max entries limit](#max-entries-limit) section.
+`imcache` actively evicts expired entries. It removes expired entries when they are accessed by most of `Cache` methods (both read and write). `Peek`, `PeekMultiple` and `PeekAll` methods are the exception. They don't remove the expired entries and do not slide the expiration time (if the sliding expiration is set).
 
-It is possible to use the `Cleaner` to periodically remove expired entries from the cache. The `Cleaner` is a background goroutine that periodically removes expired entries from the cache. The `Cleaner` is disabled by default. You can enable it when creating a new `Cache` or `Sharded` instance. `Cleaner` is stopped when the cache is closed.
+It is possible to use the `Cleaner` to periodically remove expired entries from the cache. The `Cleaner` is a background goroutine that periodically removes expired entries from the cache. The `Cleaner` is disabled by default. One can use the `WithCleanerOption` option to enable the `Cleaner` and set the cleaning interval.
 
 ```go
 // Create a new Cache with a Cleaner which will remove expired entries every 5 minutes.
@@ -92,7 +88,7 @@ c := imcache.New[string, string](imcache.WithCleanerOption[string, string](5 * t
 defer c.Close()
 ```
 
-To be notified when an entry is evicted from the cache, you can use the `EvictionCallback`. It's a function that accepts the key and value of the evicted entry along with the reason why the entry was evicted. `EvictionCallback` can be configured when creating a new `Cache` or `Sharded` instance.
+To be notified when the entry is evicted from the cache, one can use the `EvictionCallback`. It's a function that accepts the key and the value of the evicted entry along with the reason why the entry was evicted. One can use the `WithEvictionCallbackOption` option to set the `EvictionCallback` for the given cache instance.
 
 ```go
 package main
@@ -124,134 +120,208 @@ func main() {
 }
 ```
 
-`EvictionCallback` is invoked in a separate goroutine to not block any `Cache` or `Sharded` method.
+`EvictionCallback` is invoked in a separate goroutine to not block any `Cache` method.
 
 ### Max entries limit
 
-`imcache` supports max entries limit. It uses simple LRU eviction policy. If the max entries limit is set, the cache evicts the least recently used entry when the max entries limit is reached. The least recently used entry is evicted regardless of the entry's expiration time. This allows `imcache` to remain simple and efficient.
+`imcache` supports setting the max entries limit. When the max entries limit is reached, the entry is evicted according to the chosen eviction policy. `imcache` supports the following eviction policies:
 
-The max entries limit can be configured when creating a new `Cache` or `Sharded` instance.
+* `EvictionPolicyLRU` - the least recently used entry is evicted.
+* `EvictionPolicyLFU` - the least frequently used entry is evicted.
+* `EvictionPolicyRandom` - a random entry is evicted.
+
+One can use the `WithMaxEntriesLimitOption` option to set the max entries limit and the eviction policy for the given cache instance.
 
 ```go
-c := imcache.New[uint32, string](imcache.WithMaxEntriesOption[uint32, string](1000))
+c := imcache.New[uint32, string](imcache.WithMaxEntriesLimitOption[uint32, string](1000, imcache.EvictionPolicyLRU))
 ```
-
-Note that for the `Sharded` type the max entries limit is applied to each shard separately.
 
 ### Sharding
 
-`imcache` supports sharding. It's possible to create a new cache instance with a given number of shards. Each shard is a separate `Cache` instance. A shard for a given key is selected by computing the hash of the key and taking the modulus of the number of shards. `imcache` exposes the `Hasher64` interface that wraps `Sum64` accepting a key and returning a 64-bit hash of the input key. It can be used to implement custom sharding algorithms.
+`imcache` supports sharding. Each shard is a separate `Cache` instance. A shard for a given key is selected by computing the hash of the key and taking the modulus of the number of shards. `imcache` exposes the `Hasher64` interface that wraps `Sum64` accepting a key and returning a 64-bit hash of the input key. It can be used to implement custom sharding algorithms.
 
-Currently, `imcache` provides only one implementation of the `Hasher64` interface: `DefaultStringHasher64`. It uses the FNV-1a hash function.
-
-A `Sharded` instance can be created by calling the `NewSharded` method. It accepts the number of shards, `Hasher64` interface and optional configuration `Option`s as arguments.
+A `Sharded` instance can be created by calling the `NewSharded` method.
 
 ```go
 c := imcache.NewSharded[string, string](4, imcache.DefaultStringHasher64{})
 ```
 
-All previous examples apply to `Sharded` type as well. Note that `Option`(s) are applied to each shard (`Cache` instance) not to the `Sharded` instance itself.
+All previous examples apply to `Sharded` type as well. Note that `Option`(s) are applied to each shard (`Cache` instance separately) not to the `Sharded` instance itself.
 
 ## Performance
 
-`imcache` is designed to be simple and efficient. It uses a vanilla Go map to store entries and a simple and efficient implementation of double linked list to maintain LRU order. The latter is used to evict the least recently used entry when the max entries limit is reached hence if the max entries limit is not set, `imcache` doesn't maintain any additional data structures.
-
-`imcache` was compared to the vanilla Go map with simple locking mechanism. The benchmarks were run on an Apple M1 Pro 8-core CPU with 32 GB of RAM running macOS Ventura 13.1 using Go 1.20.3.
+`imcache` was compared to the vanilla Go map with simple locking mechanism. The benchmarks were run on an Apple M1 Pro 8-core CPU with 32 GB of RAM running macOS Ventura 13.4.1 using Go 1.21.6.
 
 ### Reads
 
 ```bash
 go version
-go version go1.20.3 darwin/arm64
-go test -benchmem -bench "Get_|Get$"
+go version go1.21.6 darwin/arm64
+go test -benchmem -bench "Get_|Get$|Peek_|Peek$"
 goos: darwin
 goarch: arm64
 pkg: github.com/erni27/imcache
-BenchmarkCache_Get-8                                             	 3569514	       429.8 ns/op	      23 B/op	       1 allocs/op
-BenchmarkSharded_Get/2_Shards-8                                  	 3595566	       412.8 ns/op	      23 B/op	       1 allocs/op
-BenchmarkSharded_Get/4_Shards-8                                  	 3435393	       408.5 ns/op	      23 B/op	       1 allocs/op
-BenchmarkSharded_Get/8_Shards-8                                  	 3601080	       414.5 ns/op	      23 B/op	       1 allocs/op
-BenchmarkSharded_Get/16_Shards-8                                 	 3626385	       398.2 ns/op	      23 B/op	       1 allocs/op
-BenchmarkSharded_Get/32_Shards-8                                 	 3587340	       408.7 ns/op	      23 B/op	       1 allocs/op
-BenchmarkSharded_Get/64_Shards-8                                 	 3617484	       400.2 ns/op	      23 B/op	       1 allocs/op
-BenchmarkSharded_Get/128_Shards-8                                	 3606388	       404.1 ns/op	      23 B/op	       1 allocs/op
-BenchmarkCache_Get_MaxEntriesLimit-8                             	 2587023	       518.0 ns/op	      23 B/op	       1 allocs/op
-BenchmarkSharded_Get_MaxEntriesLimit/2_Shards-8                  	 2506747	       525.7 ns/op	      23 B/op	       1 allocs/op
-BenchmarkSharded_Get_MaxEntriesLimit/4_Shards-8                  	 2459122	       531.7 ns/op	      23 B/op	       1 allocs/op
-BenchmarkSharded_Get_MaxEntriesLimit/8_Shards-8                  	 2349974	       528.2 ns/op	      23 B/op	       1 allocs/op
-BenchmarkSharded_Get_MaxEntriesLimit/16_Shards-8                 	 2454192	       536.0 ns/op	      23 B/op	       1 allocs/op
-BenchmarkSharded_Get_MaxEntriesLimit/32_Shards-8                 	 2363572	       535.2 ns/op	      23 B/op	       1 allocs/op
-BenchmarkSharded_Get_MaxEntriesLimit/64_Shards-8                 	 2399238	       535.7 ns/op	      23 B/op	       1 allocs/op
-BenchmarkSharded_Get_MaxEntriesLimit/128_Shards-8                	 2287570	       533.8 ns/op	      23 B/op	       1 allocs/op
-BenchmarkMap_Get-8                                               	 4760186	       333.2 ns/op	      23 B/op	       1 allocs/op
-BenchmarkCache_Get_Parallel-8                                    	 2670980	       498.0 ns/op	      23 B/op	       1 allocs/op
-BenchmarkSharded_Get_Parallel/2_Shards-8                         	 3999897	       326.0 ns/op	      23 B/op	       1 allocs/op
-BenchmarkSharded_Get_Parallel/4_Shards-8                         	 2844760	       434.0 ns/op	      23 B/op	       1 allocs/op
-BenchmarkSharded_Get_Parallel/8_Shards-8                         	 2945050	       431.2 ns/op	      23 B/op	       1 allocs/op
-BenchmarkSharded_Get_Parallel/16_Shards-8                        	 2936168	       428.3 ns/op	      23 B/op	       1 allocs/op
-BenchmarkSharded_Get_Parallel/32_Shards-8                        	 2960804	       431.8 ns/op	      23 B/op	       1 allocs/op
-BenchmarkSharded_Get_Parallel/64_Shards-8                        	 2910768	       428.3 ns/op	      23 B/op	       1 allocs/op
-BenchmarkSharded_Get_Parallel/128_Shards-8                       	 2946024	       429.2 ns/op	      23 B/op	       1 allocs/op
-BenchmarkCache_Get_MaxEntriesLimit_Parallel-8                    	 1980928	       633.6 ns/op	      23 B/op	       1 allocs/op
-BenchmarkSharded_Get_MaxEntriesLimit_Parallel/2_Shards-8         	 2657145	       490.6 ns/op	      23 B/op	       1 allocs/op
-BenchmarkSharded_Get_MaxEntriesLimit_Parallel/4_Shards-8         	 2472285	       516.7 ns/op	      23 B/op	       1 allocs/op
-BenchmarkSharded_Get_MaxEntriesLimit_Parallel/8_Shards-8         	 2453889	       485.1 ns/op	      23 B/op	       1 allocs/op
-BenchmarkSharded_Get_MaxEntriesLimit_Parallel/16_Shards-8        	 2566749	       492.8 ns/op	      23 B/op	       1 allocs/op
-BenchmarkSharded_Get_MaxEntriesLimit_Parallel/32_Shards-8        	 2542867	       471.6 ns/op	      23 B/op	       1 allocs/op
-BenchmarkSharded_Get_MaxEntriesLimit_Parallel/64_Shards-8        	 2599514	       486.5 ns/op	      23 B/op	       1 allocs/op
-BenchmarkSharded_Get_MaxEntriesLimit_Parallel/128_Shards-8       	 2509952	       470.6 ns/op	      23 B/op	       1 allocs/op
-BenchmarkMap_Get_Parallel-8                                      	 3271418	       447.2 ns/op	      23 B/op	       1 allocs/op
+BenchmarkCache_Get-8                                                                 2655246	       428.5 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get/2_Shards-8                                                      2810713	       436.8 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get/4_Shards-8                                                      2732820	       444.9 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get/8_Shards-8                                                      2957444	       445.7 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get/16_Shards-8                                                     2773999	       447.0 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get/32_Shards-8                                                     2752075	       443.4 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get/64_Shards-8                                                     2752899	       439.7 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get/128_Shards-8                                                    2771691	       456.3 ns/op	      23 B/op	       1 allocs/op
+BenchmarkCache_Get_MaxEntriesLimit_EvictionPolicyLRU-8                               2410712	       526.8 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLRU/2_Shards-8                    2346715	       543.2 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLRU/4_Shards-8                    2317453	       566.2 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLRU/8_Shards-8                    2293774	       556.5 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLRU/16_Shards-8                   2292554	       557.7 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLRU/32_Shards-8                   2262634	       542.0 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLRU/64_Shards-8                   2318079	       544.2 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLRU/128_Shards-8                  2278434	       565.6 ns/op	      23 B/op	       1 allocs/op
+BenchmarkCache_Get_MaxEntriesLimit_EvictionPolicyLFU-8                               2482602	       528.0 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLFU/2_Shards-8                    2403782	       534.2 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLFU/4_Shards-8                    2286364	       548.8 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLFU/8_Shards-8                    2239857	       576.0 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLFU/16_Shards-8                   2198414	       556.7 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLFU/32_Shards-8                   2109063	       554.7 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLFU/64_Shards-8                   2251125	       550.6 ns/op	      23 B/op	       2 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLFU/128_Shards-8                  2172662	       551.0 ns/op	      23 B/op	       2 allocs/op
+BenchmarkCache_Get_MaxEntriesLimit_EvictionPolicyRandom-8                            2959924	       433.1 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyRandom/2_Shards-8                 2909020	       429.9 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyRandom/4_Shards-8                 2890734	       438.4 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyRandom/8_Shards-8                 2947471	       432.5 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyRandom/16_Shards-8                2937757	       456.9 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyRandom/32_Shards-8                2963146	       427.1 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyRandom/64_Shards-8                2794441	       430.1 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyRandom/128_Shards-8               2965760	       466.8 ns/op	      23 B/op	       1 allocs/op
+BenchmarkCache_Peek-8                                                                3034557	       419.7 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Peek/2_Shards-8                                                     2907327	       452.0 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Peek/4_Shards-8                                                     2918097	       441.8 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Peek/8_Shards-8                                                     2923375	       442.1 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Peek/16_Shards-8                                                    2927227	       443.9 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Peek/32_Shards-8                                                    2843028	       439.9 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Peek/64_Shards-8                                                    2898458	       461.5 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Peek/128_Shards-8                                                   2805452	       460.1 ns/op	      23 B/op	       1 allocs/op
+BenchmarkMap_Get-8                                                                   4693522	       327.8 ns/op	      23 B/op	       1 allocs/op
+BenchmarkCache_Get_Parallel-8                                                        2272208	       546.0 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_Parallel/2_Shards-8                                             3216616	       416.7 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_Parallel/4_Shards-8                                             3898989	       327.8 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_Parallel/8_Shards-8                                             5443684	       241.1 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_Parallel/16_Shards-8                                            6995467	       186.5 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_Parallel/32_Shards-8                                            8505585	       154.6 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_Parallel/64_Shards-8                                            10256752	       170.9 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_Parallel/128_Shards-8                                           12003910	       113.5 ns/op	      23 B/op	       1 allocs/op
+BenchmarkCache_Get_MaxEntriesLimit_EvictionPolicyLRU_Parallel-8                      1995304	       627.3 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLRU_Parallel/2_Shards-8           2628376	       474.5 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLRU_Parallel/4_Shards-8           3056476	       407.5 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLRU_Parallel/8_Shards-8           4281996	       304.3 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLRU_Parallel/16_Shards-8          5438091	       237.2 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLRU_Parallel/32_Shards-8          6442630	       209.5 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLRU_Parallel/64_Shards-8          8096386	       177.4 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLRU_Parallel/128_Shards-8         9417211	       137.3 ns/op	      23 B/op	       1 allocs/op
+BenchmarkCache_Get_MaxEntriesLimit_EvictionPolicyLFU_Parallel-8                      1463374	       796.4 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLFU_Parallel/2_Shards-8           2112945	       591.5 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLFU_Parallel/4_Shards-8           3008568	       412.4 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLFU_Parallel/8_Shards-8           4302746	       296.3 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLFU_Parallel/16_Shards-8          5671981	       231.8 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLFU_Parallel/32_Shards-8          6828380	       186.5 ns/op	      23 B/op	       2 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLFU_Parallel/64_Shards-8          7074661	       161.5 ns/op	      23 B/op	       2 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyLFU_Parallel/128_Shards-8         9294237	       139.2 ns/op	      23 B/op	       2 allocs/op
+BenchmarkCache_Get_MaxEntriesLimit_EvictionPolicyRandom_Parallel-8                   1838180	       675.1 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyRandom_Parallel/2_Shards-8        2781007	       455.5 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyRandom_Parallel/4_Shards-8        4072056	       341.4 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyRandom_Parallel/8_Shards-8        5529966	       227.5 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyRandom_Parallel/16_Shards-8       7354364	       211.7 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyRandom_Parallel/32_Shards-8       8624466	       138.5 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyRandom_Parallel/64_Shards-8       11442829	       161.4 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Get_MaxEntriesLimit_EvictionPolicyRandom_Parallel/128_Shards-8      12071902	       104.4 ns/op	      23 B/op	       1 allocs/op
+BenchmarkCache_Peek_Parallel-8                                                       7957777	       155.1 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Peek_Parallel/2_Shards-8                                            7781154	       163.5 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Peek_Parallel/4_Shards-8                                           12301404	       112.0 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Peek_Parallel/8_Shards-8                                           12828216	       106.2 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Peek_Parallel/16_Shards-8                                          13837890	       94.11 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Peek_Parallel/32_Shards-8                                          14921073	       89.67 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Peek_Parallel/64_Shards-8                                          15708536	       87.81 ns/op	      23 B/op	       1 allocs/op
+BenchmarkSharded_Peek_Parallel/128_Shards-8                                         16547871	       84.76 ns/op	      23 B/op	       1 allocs/op
+BenchmarkMap_Get_Parallel-8                                                          3098846	       453.0 ns/op	      23 B/op	       1 allocs/op
 PASS
-ok  	github.com/erni27/imcache	133.111s
+ok  	github.com/erni27/imcache	366.377s
 ```
-
-The results are rather predictable. If data is accessed by a single goroutine, the vanilla Go map with simple locking mechanism is the fastest. `Sharded` is the fastest when data is accessed by multiple goroutines. Both `Cache` and `Sharded` are slightly slower when max entries limit is set (maintaining LRU order steals a few nanoseconds).
 
 ### Writes
 
 ```bash
 go version
-go version go1.20.3 darwin/arm64
+go version go1.21.6 darwin/arm64
 go test -benchmem -bench "_Set"
 goos: darwin
 goarch: arm64
 pkg: github.com/erni27/imcache
-BenchmarkCache_Set-8                                             	 3612012	       417.0 ns/op	     188 B/op	       3 allocs/op
-BenchmarkSharded_Set/2_Shards-8                                  	 3257109	       456.1 ns/op	     202 B/op	       3 allocs/op
-BenchmarkSharded_Set/4_Shards-8                                  	 3197056	       457.8 ns/op	     205 B/op	       3 allocs/op
-BenchmarkSharded_Set/8_Shards-8                                  	 3229351	       459.8 ns/op	     203 B/op	       3 allocs/op
-BenchmarkSharded_Set/16_Shards-8                                 	 3210788	       464.8 ns/op	     204 B/op	       3 allocs/op
-BenchmarkSharded_Set/32_Shards-8                                 	 3144094	       468.0 ns/op	     207 B/op	       3 allocs/op
-BenchmarkSharded_Set/64_Shards-8                                 	 3139846	       468.4 ns/op	     208 B/op	       3 allocs/op
-BenchmarkSharded_Set/128_Shards-8                                	 3078704	       476.0 ns/op	     211 B/op	       3 allocs/op
-BenchmarkCache_Set_MaxEntriesLimit-8                             	 2845030	       469.1 ns/op	     176 B/op	       4 allocs/op
-BenchmarkSharded_Set_MaxEntriesLimit/2_Shards-8                  	 2561269	       517.0 ns/op	     183 B/op	       4 allocs/op
-BenchmarkSharded_Set_MaxEntriesLimit/4_Shards-8                  	 2495008	       527.5 ns/op	     185 B/op	       4 allocs/op
-BenchmarkSharded_Set_MaxEntriesLimit/8_Shards-8                  	 2446089	       533.3 ns/op	     187 B/op	       4 allocs/op
-BenchmarkSharded_Set_MaxEntriesLimit/16_Shards-8                 	 2399400	       542.0 ns/op	     188 B/op	       4 allocs/op
-BenchmarkSharded_Set_MaxEntriesLimit/32_Shards-8                 	 2358630	       541.0 ns/op	     190 B/op	       4 allocs/op
-BenchmarkSharded_Set_MaxEntriesLimit/64_Shards-8                 	 2346480	       551.0 ns/op	     190 B/op	       4 allocs/op
-BenchmarkSharded_Set_MaxEntriesLimit/128_Shards-8                	 2277868	       554.1 ns/op	     193 B/op	       4 allocs/op
-BenchmarkMap_Set-8                                               	 5529367	       342.1 ns/op	     113 B/op	       2 allocs/op
-BenchmarkCache_Set_Parallel-8                                    	 2852869	       523.2 ns/op	     223 B/op	       3 allocs/op
-BenchmarkSharded_Set_Parallel/2_Shards-8                         	 2758494	       472.4 ns/op	     229 B/op	       3 allocs/op
-BenchmarkSharded_Set_Parallel/4_Shards-8                         	 2703622	       494.1 ns/op	     232 B/op	       3 allocs/op
-BenchmarkSharded_Set_Parallel/8_Shards-8                         	 2742208	       480.2 ns/op	     230 B/op	       3 allocs/op
-BenchmarkSharded_Set_Parallel/16_Shards-8                        	 2785494	       463.6 ns/op	     227 B/op	       3 allocs/op
-BenchmarkSharded_Set_Parallel/32_Shards-8                        	 2797771	       466.0 ns/op	     226 B/op	       3 allocs/op
-BenchmarkSharded_Set_Parallel/64_Shards-8                        	 2800551	       460.8 ns/op	     226 B/op	       3 allocs/op
-BenchmarkSharded_Set_Parallel/128_Shards-8                       	 2796956	       462.2 ns/op	     226 B/op	       3 allocs/op
-BenchmarkCache_Set_MaxEntriesLimit_Parallel-8                    	 2172498	       588.4 ns/op	     197 B/op	       4 allocs/op
-BenchmarkSharded_Set_MaxEntriesLimit_Parallel/2_Shards-8         	 2495745	       498.0 ns/op	     185 B/op	       4 allocs/op
-BenchmarkSharded_Set_MaxEntriesLimit_Parallel/4_Shards-8         	 2388216	       527.8 ns/op	     189 B/op	       4 allocs/op
-BenchmarkSharded_Set_MaxEntriesLimit_Parallel/8_Shards-8         	 2466673	       509.2 ns/op	     186 B/op	       4 allocs/op
-BenchmarkSharded_Set_MaxEntriesLimit_Parallel/16_Shards-8        	 2486941	       501.3 ns/op	     185 B/op	       4 allocs/op
-BenchmarkSharded_Set_MaxEntriesLimit_Parallel/32_Shards-8        	 2479155	       498.1 ns/op	     186 B/op	       4 allocs/op
-BenchmarkSharded_Set_MaxEntriesLimit_Parallel/64_Shards-8        	 2478316	       495.2 ns/op	     186 B/op	       4 allocs/op
-BenchmarkSharded_Set_MaxEntriesLimit_Parallel/128_Shards-8       	 2469722	       493.1 ns/op	     186 B/op	       4 allocs/op
-BenchmarkMap_Set_Parallel-8                                      	 3236552	       434.0 ns/op	     100 B/op	       2 allocs/op
+BenchmarkCache_Set-8                                                                 2942062	       461.7 ns/op	     161 B/op	       2 allocs/op
+BenchmarkSharded_Set/2_Shards-8                                                      2939275	       487.5 ns/op	     162 B/op	       2 allocs/op
+BenchmarkSharded_Set/4_Shards-8                                                      2827146	       497.1 ns/op	     166 B/op	       2 allocs/op
+BenchmarkSharded_Set/8_Shards-8                                                      2837316	       509.1 ns/op	     165 B/op	       2 allocs/op
+BenchmarkSharded_Set/16_Shards-8                                                     2818513	       495.7 ns/op	     166 B/op	       2 allocs/op
+BenchmarkSharded_Set/32_Shards-8                                                     2793490	       506.3 ns/op	     167 B/op	       2 allocs/op
+BenchmarkSharded_Set/64_Shards-8                                                     2815544	       499.7 ns/op	     166 B/op	       2 allocs/op
+BenchmarkSharded_Set/128_Shards-8                                                    2738779	       511.2 ns/op	     170 B/op	       2 allocs/op
+BenchmarkCache_Set_MaxEntriesLimit_EvictionPolicyLRU-8                               3217950	       423.2 ns/op	      65 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLRU/2_Shards-8                    2893335	       458.4 ns/op	      69 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLRU/4_Shards-8                    2940762	       460.9 ns/op	      69 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLRU/8_Shards-8                    2976267	       462.5 ns/op	      69 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLRU/16_Shards-8                   2849967	       478.1 ns/op	      69 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLRU/32_Shards-8                   2859116	       472.2 ns/op	      69 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLRU/64_Shards-8                   2842370	       466.6 ns/op	      68 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLRU/128_Shards-8                  2863222	       481.6 ns/op	      68 B/op	       2 allocs/op
+BenchmarkCache_Set_MaxEntriesLimit_EvictionPolicyLFU-8                               3198320	       417.6 ns/op	      65 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLFU/2_Shards-8                    2944507	       450.2 ns/op	      69 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLFU/4_Shards-8                    2915707	       456.9 ns/op	      69 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLFU/8_Shards-8                    2820458	       464.4 ns/op	      68 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLFU/16_Shards-8                   2833208	       479.6 ns/op	      68 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLFU/32_Shards-8                   2864629	       460.9 ns/op	      69 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLFU/64_Shards-8                   2846596	       491.7 ns/op	      68 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLFU/128_Shards-8                  2841228	       493.6 ns/op	      68 B/op	       2 allocs/op
+BenchmarkCache_Set_MaxEntriesLimit_EvictionPolicyRandom-8                            2988330	       459.8 ns/op	      59 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyRandom/2_Shards-8                 2713388	       495.6 ns/op	      57 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyRandom/4_Shards-8                 2756364	       493.7 ns/op	      58 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyRandom/8_Shards-8                 2691565	       484.5 ns/op	      57 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyRandom/16_Shards-8                2710840	       479.6 ns/op	      57 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyRandom/32_Shards-8                2728695	       496.0 ns/op	      57 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyRandom/64_Shards-8                2690887	       507.6 ns/op	      57 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyRandom/128_Shards-8               2663871	       495.1 ns/op	      57 B/op	       2 allocs/op
+BenchmarkMap_Set-8                                                                   5847526	       339.0 ns/op	     106 B/op	       2 allocs/op
+BenchmarkCache_Set_Parallel-8                                                        2347249	       527.7 ns/op	     123 B/op	       2 allocs/op
+BenchmarkSharded_Set_Parallel/2_Shards-8                                             3112208	       444.3 ns/op	     156 B/op	       2 allocs/op
+BenchmarkSharded_Set_Parallel/4_Shards-8                                             3323001	       401.2 ns/op	     149 B/op	       2 allocs/op
+BenchmarkSharded_Set_Parallel/8_Shards-8                                             4130948	       291.3 ns/op	     131 B/op	       2 allocs/op
+BenchmarkSharded_Set_Parallel/16_Shards-8                                            5516203	       274.4 ns/op	     169 B/op	       2 allocs/op
+BenchmarkSharded_Set_Parallel/32_Shards-8                                            6069385	       219.0 ns/op	     158 B/op	       2 allocs/op
+BenchmarkSharded_Set_Parallel/64_Shards-8                                            7290878	       187.9 ns/op	     141 B/op	       2 allocs/op
+BenchmarkSharded_Set_Parallel/128_Shards-8                                           8021259	       163.6 ns/op	     133 B/op	       2 allocs/op
+BenchmarkCache_Set_MaxEntriesLimit_EvictionPolicyLRU_Parallel-8                      2402929	       555.8 ns/op	      66 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLRU_Parallel/2_Shards-8           2835458	       418.2 ns/op	      69 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLRU_Parallel/4_Shards-8           3219746	       393.8 ns/op	      65 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLRU_Parallel/8_Shards-8           4225972	       301.9 ns/op	      65 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLRU_Parallel/16_Shards-8          5186444	       246.7 ns/op	      67 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLRU_Parallel/32_Shards-8          6100933	       222.6 ns/op	      70 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLRU_Parallel/64_Shards-8          7518198	       180.7 ns/op	      65 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLRU_Parallel/128_Shards-8         8257630	       180.1 ns/op	      65 B/op	       2 allocs/op
+BenchmarkCache_Set_MaxEntriesLimit_EvictionPolicyLFU_Parallel-8                      2344273	       543.1 ns/op	      66 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLFU_Parallel/2_Shards-8           2973801	       442.6 ns/op	      69 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLFU_Parallel/4_Shards-8           3416180	       383.2 ns/op	      65 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLFU_Parallel/8_Shards-8           4511509	       293.7 ns/op	      65 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLFU_Parallel/16_Shards-8          5374215	       230.7 ns/op	      68 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLFU_Parallel/32_Shards-8          6602998	       205.1 ns/op	      65 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLFU_Parallel/64_Shards-8          7730086	       171.8 ns/op	      65 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyLFU_Parallel/128_Shards-8         8232051	       154.6 ns/op	      65 B/op	       2 allocs/op
+BenchmarkCache_Set_MaxEntriesLimit_EvictionPolicyRandom_Parallel-8                   2186001	       592.0 ns/op	      55 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyRandom_Parallel/2_Shards-8        2716564	       438.3 ns/op	      57 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyRandom_Parallel/4_Shards-8        3548733	       366.0 ns/op	      55 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyRandom_Parallel/8_Shards-8        4665452	       296.7 ns/op	      55 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyRandom_Parallel/16_Shards-8       6088111	       240.0 ns/op	      59 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyRandom_Parallel/32_Shards-8       7442355	       197.1 ns/op	      55 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyRandom_Parallel/64_Shards-8       8089219	       163.0 ns/op	      55 B/op	       2 allocs/op
+BenchmarkSharded_Set_MaxEntriesLimit_EvictionPolicyRandom_Parallel/128_Shards-8      9815180	       144.8 ns/op	      56 B/op	       2 allocs/op
+BenchmarkMap_Set_Parallel-8                                                          3541270	       407.3 ns/op	      92 B/op	       2 allocs/op
 PASS
-ok  	github.com/erni27/imcache	74.508s
+ok  	github.com/erni27/imcache	135.166s
 ```
-
-When it comes to writes, the vanilla Go map is the fastest even if accessed by multiple goroutines. Vanilla Go is around 7% faster than `Sharded` and around 12% faster than `Sharded` with max entries limit set. It is caused by the fact, internally `Cache` does a few checks before writing the value into the internal map to ensure safety and proper eviction. Again both `Cache` and `Sharded` are slightly slower when max entries limit is set.
