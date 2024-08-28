@@ -386,8 +386,8 @@ func (c *Cache[K, V]) Set(key K, val V, exp Expiration) {
 func (c *Cache[K, V]) GetOrSet(key K, val V, exp Expiration) (value V, present bool) {
 	now := time.Now()
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.closed {
-		c.mu.Unlock()
 		var zero V
 		return zero, false
 	}
@@ -399,7 +399,6 @@ func (c *Cache[K, V]) GetOrSet(key K, val V, exp Expiration) (value V, present b
 		currentEntry.slide(now)
 		currentNode.setEntry(currentEntry)
 		c.queue.touch(currentNode)
-		c.mu.Unlock()
 		return currentEntry.val, true
 	}
 	if ok {
@@ -416,7 +415,6 @@ func (c *Cache[K, V]) GetOrSet(key K, val V, exp Expiration) (value V, present b
 		delete(c.m, evictedNode.entry().key)
 	}
 	c.m[key] = c.queue.add(entry[K, V]{key: key, val: val, exp: exp.new(now, c.defaultExp, c.sliding)})
-	c.mu.Unlock()
 	if c.onEviction == nil || evictedNode == nil {
 		return val, false
 	}
