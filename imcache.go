@@ -135,7 +135,6 @@ func (c *Cache[K, V]) getMultiple(now time.Time, keys ...K) map[K]V {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
-
 		return nil
 	}
 	got := make(map[K]V, len(keys))
@@ -329,7 +328,6 @@ func (c *Cache[K, V]) Set(key K, val V, exp Expiration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
-
 		return
 	}
 	// Make sure that the shard is initialized.
