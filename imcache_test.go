@@ -4,12 +4,32 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"os"
 	"reflect"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
 )
+
+type fakeClock struct {
+	now time.Time
+}
+
+func (c *fakeClock) Now() time.Time {
+	return c.now
+}
+
+func (c *fakeClock) AdvanceTime(d time.Duration) {
+	c.now = c.now.Add(d)
+}
+
+var clock = fakeClock{now: time.Now()}
+
+func TestMain(m *testing.M) {
+	nowf = clock.Now
+	os.Exit(m.Run())
+}
 
 type imcache[K comparable, V any] interface {
 	Get(key K) (v V, present bool)
@@ -31,9 +51,9 @@ type imcache[K comparable, V any] interface {
 	Close()
 }
 
-// caches is a list of string-string caches with default configuration to test.
-// If a test needs different type of cache or configured one, it should be
-// created within the test.
+// caches contains functions returning [string, string] imcache with
+// default configuration to test. If a test needs a different type of imcache
+// (or a configured one), it should be created within the test.
 var caches = []struct {
 	create func() imcache[string, string]
 	name   string
@@ -70,6 +90,7 @@ func TestImcache_Get(t *testing.T) {
 			name: "success",
 			setup: func(c imcache[string, string]) {
 				c.Set("foo", "bar", WithNoExpiration())
+				clock.AdvanceTime(time.Hour)
 			},
 			key:  "foo",
 			want: "bar",
@@ -84,7 +105,7 @@ func TestImcache_Get(t *testing.T) {
 			name: "entry expired",
 			setup: func(c imcache[string, string]) {
 				c.Set("foo", "bar", WithExpiration(time.Nanosecond))
-				time.Sleep(time.Nanosecond)
+				clock.AdvanceTime(2 * time.Nanosecond)
 			},
 			key: "foo",
 		},
@@ -107,15 +128,15 @@ func TestImcache_Get_SlidingExpiration(t *testing.T) {
 		t.Run(cache.name, func(t *testing.T) {
 			c := cache.create()
 			c.Set("foo", "foo", WithSlidingExpiration(500*time.Millisecond))
-			time.Sleep(300 * time.Millisecond)
+			clock.AdvanceTime(300 * time.Millisecond)
 			if _, ok := c.Get("foo"); !ok {
 				t.Errorf("imcache.Get(%s) = _, %t, want _, true", "foo", ok)
 			}
-			time.Sleep(300 * time.Millisecond)
+			clock.AdvanceTime(300 * time.Millisecond)
 			if _, ok := c.Get("foo"); !ok {
 				t.Errorf("imcache.Get(%s) = _, %t, want _, true", "foo", ok)
 			}
-			time.Sleep(500 * time.Millisecond)
+			clock.AdvanceTime(501 * time.Millisecond)
 			if _, ok := c.Get("foo"); ok {
 				t.Errorf("imcache.Get(%s) = _, %t, want _, false", "foo", ok)
 			}
@@ -137,7 +158,7 @@ func TestImcache_GetMultiple(t *testing.T) {
 				c.Set("bar", "foo", WithNoExpiration())
 				c.Set("foobar", "foobar", WithNoExpiration())
 				c.Set("barfoo", "barfoo", WithExpiration(time.Nanosecond))
-				time.Sleep(time.Nanosecond)
+				clock.AdvanceTime(2 * time.Nanosecond)
 			},
 			keys: []string{"foo", "bar", "foobar", "barfoo"},
 			want: map[string]string{
@@ -159,7 +180,7 @@ func TestImcache_GetMultiple(t *testing.T) {
 			setup: func(c imcache[string, string]) {
 				c.Set("foo", "bar", WithExpiration(time.Nanosecond))
 				c.Set("bar", "foo", WithExpiration(time.Nanosecond))
-				time.Sleep(time.Nanosecond)
+				clock.AdvanceTime(2 * time.Nanosecond)
 			},
 			keys: []string{"foo", "bar"},
 			want: map[string]string{},
@@ -185,7 +206,7 @@ func TestImcache_GetMultiple_SlidingExpiration(t *testing.T) {
 			c.Set("foo", "foo", WithSlidingExpiration(500*time.Millisecond))
 			c.Set("bar", "bar", WithSlidingExpiration(500*time.Millisecond))
 			c.Set("foobar", "foobar", WithExpiration(500*time.Millisecond))
-			time.Sleep(300 * time.Millisecond)
+			clock.AdvanceTime(300 * time.Millisecond)
 			want := map[string]string{
 				"foo":    "foo",
 				"bar":    "bar",
@@ -194,7 +215,7 @@ func TestImcache_GetMultiple_SlidingExpiration(t *testing.T) {
 			if got := c.GetMultiple("foo", "bar", "foobar"); !reflect.DeepEqual(got, want) {
 				t.Errorf("imcache.GetMultiple(_) = %v, want %v", got, want)
 			}
-			time.Sleep(300 * time.Millisecond)
+			clock.AdvanceTime(300 * time.Millisecond)
 			want = map[string]string{
 				"foo": "foo",
 				"bar": "bar",
@@ -202,7 +223,7 @@ func TestImcache_GetMultiple_SlidingExpiration(t *testing.T) {
 			if got := c.GetMultiple("foo", "bar", "foobar"); !reflect.DeepEqual(got, want) {
 				t.Errorf("imcache.GetMultiple(_) = %v, want %v", got, want)
 			}
-			time.Sleep(500 * time.Millisecond)
+			clock.AdvanceTime(501 * time.Millisecond)
 			if got := c.GetMultiple("foo", "bar", "foobar"); got == nil || len(got) != 0 {
 				t.Errorf("imcache.GetMultiple(_) = %v, want empty", got)
 			}
@@ -235,7 +256,7 @@ func TestImcache_Peek(t *testing.T) {
 			name: "entry expired",
 			setup: func(c imcache[string, string]) {
 				c.Set("foo", "bar", WithExpiration(time.Nanosecond))
-				time.Sleep(time.Nanosecond)
+				clock.AdvanceTime(2 * time.Nanosecond)
 			},
 			key: "foo",
 		},
@@ -258,11 +279,12 @@ func TestImcache_Peek_SlidingExpiration(t *testing.T) {
 		t.Run(cache.name, func(t *testing.T) {
 			c := cache.create()
 			c.Set("foo", "foo", WithSlidingExpiration(500*time.Millisecond))
-			time.Sleep(300 * time.Millisecond)
+			clock.AdvanceTime(300 * time.Millisecond)
 			if _, ok := c.Peek("foo"); !ok {
 				t.Fatal("got imcache.Peek(_) = _, false, want _, true")
 			}
-			time.Sleep(300 * time.Millisecond)
+			clock.AdvanceTime(201 * time.Millisecond)
+			// Peek shouldn't slide the expiration.
 			if _, ok := c.Peek("foo"); ok {
 				t.Fatal("got imcache.Peek(_) = _, true, want _, false")
 			}
@@ -284,6 +306,7 @@ func TestImcache_PeekMultiple(t *testing.T) {
 				c.Set("bar", "foo", WithNoExpiration())
 				c.Set("foobar", "foobar", WithNoExpiration())
 				c.Set("barfoo", "barfoo", WithNoExpiration())
+				clock.AdvanceTime(time.Hour)
 			},
 			keys: []string{"foo", "bar", "foobar", "barfoo"},
 			want: map[string]string{
@@ -305,11 +328,11 @@ func TestImcache_PeekMultiple(t *testing.T) {
 			name: "entry expired",
 			setup: func(c imcache[string, string]) {
 				c.Set("foo", "bar", WithExpiration(time.Nanosecond))
-				c.Set("bar", "foo", WithExpiration(time.Nanosecond))
-				time.Sleep(time.Nanosecond)
+				c.Set("bar", "foo", WithExpiration(2*time.Nanosecond))
+				clock.AdvanceTime(2 * time.Nanosecond)
 			},
 			keys: []string{"foo", "bar"},
-			want: map[string]string{},
+			want: map[string]string{"bar": "foo"},
 		},
 	}
 	for _, cache := range caches {
@@ -331,12 +354,13 @@ func TestImcache_PeekMultiple_SlidingExpiration(t *testing.T) {
 			c := cache.create()
 			c.Set("foo", "foo", WithSlidingExpiration(500*time.Millisecond))
 			c.Set("bar", "bar", WithSlidingExpiration(400*time.Millisecond))
-			time.Sleep(300 * time.Millisecond)
+			clock.AdvanceTime(300 * time.Millisecond)
 			want := map[string]string{"foo": "foo", "bar": "bar"}
 			if got := c.PeekMultiple("foo", "bar"); !reflect.DeepEqual(got, want) {
 				t.Fatalf("got imcache.PeekMultiple(_) = %v, want %v", got, want)
 			}
-			time.Sleep(300 * time.Millisecond)
+			clock.AdvanceTime(201 * time.Millisecond)
+			// PeekMultiple shouldn't slide the expiration.
 			want = make(map[string]string)
 			if got := c.PeekMultiple("foo", "bar"); !reflect.DeepEqual(got, want) {
 				t.Fatalf("got imcache.PeekMultiple(_) = %v, want %v", got, want)
@@ -353,7 +377,7 @@ func TestImcache_PeekAll(t *testing.T) {
 			c.Set("foobar", "foobar", WithNoExpiration())
 			c.Set("barfoo", "barfoo", WithNoExpiration())
 			c.Set("bar", "bar", WithExpiration(time.Nanosecond))
-			time.Sleep(time.Nanosecond)
+			clock.AdvanceTime(2 * time.Nanosecond)
 			want := map[string]string{
 				"foo":    "foo",
 				"foobar": "foobar",
@@ -373,12 +397,13 @@ func TestImcache_PeekAll_SlidingExpiration(t *testing.T) {
 			c.Set("foo", "foo", WithSlidingExpiration(500*time.Millisecond))
 			c.Set("bar", "bar", WithSlidingExpiration(400*time.Millisecond))
 			c.Set("foobar", "foobar", WithNoExpiration())
-			time.Sleep(300 * time.Millisecond)
+			clock.AdvanceTime(300 * time.Millisecond)
 			want := map[string]string{"foo": "foo", "bar": "bar", "foobar": "foobar"}
 			if got := c.PeekAll(); !reflect.DeepEqual(got, want) {
 				t.Fatalf("got imcache.PeekAll() = %v, want %v", got, want)
 			}
-			time.Sleep(300 * time.Millisecond)
+			clock.AdvanceTime(201 * time.Millisecond)
+			// PeekAll shouldn't slide the expiration.
 			want = map[string]string{"foobar": "foobar"}
 			if got := c.PeekAll(); !reflect.DeepEqual(got, want) {
 				t.Fatalf("got imcache.PeekAll() = %v, want %v", got, want)
@@ -404,6 +429,7 @@ func TestImcache_Set(t *testing.T) {
 			name: "replace existing entry",
 			setup: func(c imcache[string, string]) {
 				c.Set("foo", "foo", WithNoExpiration())
+				clock.AdvanceTime(10 * time.Hour)
 			},
 			key: "foo",
 			val: "bar",
@@ -412,7 +438,7 @@ func TestImcache_Set(t *testing.T) {
 			name: "add new entry if old expired",
 			setup: func(c imcache[string, string]) {
 				c.Set("foo", "foo", WithExpirationDate(time.Now().Add(time.Nanosecond)))
-				time.Sleep(time.Nanosecond)
+				clock.AdvanceTime(2 * time.Nanosecond)
 			},
 			key: "foo",
 			val: "bar",
@@ -452,7 +478,7 @@ func TestImcache_GetOrSet(t *testing.T) {
 			name: "add new entry if old expired",
 			setup: func(c imcache[string, string]) {
 				c.Set("foo", "foo", WithExpiration(time.Nanosecond))
-				time.Sleep(time.Nanosecond)
+				clock.AdvanceTime(2 * time.Nanosecond)
 			},
 			key:  "foo",
 			val:  "bar",
@@ -462,6 +488,7 @@ func TestImcache_GetOrSet(t *testing.T) {
 			name: "get existing entry",
 			setup: func(c imcache[string, string]) {
 				c.Set("foo", "foo", WithNoExpiration())
+				clock.AdvanceTime(2 * time.Hour)
 			},
 			key:     "foo",
 			val:     "bar",
@@ -487,15 +514,15 @@ func TestImcache_GetOrSet_SlidingExpiration(t *testing.T) {
 		t.Run(cache.name, func(t *testing.T) {
 			c := cache.create()
 			c.Set("foo", "foo", WithSlidingExpiration(500*time.Millisecond))
-			time.Sleep(300 * time.Millisecond)
+			clock.AdvanceTime(300 * time.Millisecond)
 			if _, ok := c.GetOrSet("foo", "bar", WithSlidingExpiration(500*time.Millisecond)); !ok {
 				t.Errorf("imcache.GetOrSet(%s, _, _) = _, %t, want _, true", "foo", ok)
 			}
-			time.Sleep(300 * time.Millisecond)
+			clock.AdvanceTime(300 * time.Millisecond)
 			if _, ok := c.GetOrSet("foo", "bar", WithSlidingExpiration(500*time.Millisecond)); !ok {
 				t.Errorf("imcache.GetOrSet(%s, _, _) = _, %t, want _, true", "foo", ok)
 			}
-			time.Sleep(500 * time.Millisecond)
+			clock.AdvanceTime(501 * time.Millisecond)
 			if _, ok := c.GetOrSet("foo", "bar", WithSlidingExpiration(500*time.Millisecond)); ok {
 				t.Errorf("imcache.GetOrSet(%s, _, _) = _, %t, want _, false", "foo", ok)
 			}
@@ -526,7 +553,7 @@ func TestImcache_Replace(t *testing.T) {
 			name: "entry expired",
 			setup: func(c imcache[string, string]) {
 				c.Set("foo", "foo", WithExpiration(time.Nanosecond))
-				time.Sleep(time.Nanosecond)
+				clock.AdvanceTime(2 * time.Nanosecond)
 			},
 			key: "foo",
 			val: "bar",
@@ -584,6 +611,7 @@ func TestImcache_ReplaceWithFunc(t *testing.T) {
 			name: "success",
 			setup: func(c imcache[string, int32]) {
 				c.Set("foo", 997, WithNoExpiration())
+				clock.AdvanceTime(time.Minute)
 			},
 			key:     "foo",
 			f:       increment,
@@ -594,7 +622,7 @@ func TestImcache_ReplaceWithFunc(t *testing.T) {
 			name: "entry expired",
 			setup: func(c imcache[string, int32]) {
 				c.Set("foo", 997, WithExpiration(time.Nanosecond))
-				time.Sleep(time.Nanosecond)
+				clock.AdvanceTime(2 * time.Nanosecond)
 			},
 			key: "foo",
 			f:   increment,
@@ -635,7 +663,7 @@ func TestImcache_ReplaceKey(t *testing.T) {
 		{
 			name: "success",
 			setup: func(c imcache[string, string]) {
-				c.Set("foo", "foo", WithNoExpiration())
+				c.Set("foo", "foo", WithExpiration(time.Nanosecond))
 			},
 			old:  "foo",
 			new:  "bar",
@@ -652,7 +680,7 @@ func TestImcache_ReplaceKey(t *testing.T) {
 			name: "entry expired",
 			setup: func(c imcache[string, string]) {
 				c.Set("foo", "foo", WithExpiration(time.Nanosecond))
-				time.Sleep(time.Nanosecond)
+				clock.AdvanceTime(2 * time.Nanosecond)
 			},
 			old: "foo",
 			new: "bar",
@@ -737,7 +765,7 @@ func TestImcache_CompareAndSwap(t *testing.T) {
 			name: "entry expired",
 			setup: func(c imcache[string, string]) {
 				c.Set("foo", "foo", WithExpiration(time.Nanosecond))
-				time.Sleep(time.Nanosecond)
+				clock.AdvanceTime(2 * time.Nanosecond)
 			},
 			key:      "foo",
 			expected: "foo",
@@ -805,7 +833,7 @@ func TestImcache_Remove(t *testing.T) {
 			name: "entry expired",
 			setup: func(c imcache[string, string]) {
 				c.Set("foo", "foo", WithExpiration(time.Nanosecond))
-				time.Sleep(time.Nanosecond)
+				clock.AdvanceTime(2 * time.Nanosecond)
 			},
 			key: "foo",
 		},
@@ -830,9 +858,9 @@ func TestImcache_RemoveAll(t *testing.T) {
 	for _, cache := range caches {
 		t.Run(cache.name, func(t *testing.T) {
 			c := cache.create()
-			c.Set("foo", "foo", WithNoExpiration())
+			c.Set("foo", "foo", WithExpiration(time.Hour))
 			c.Set("bar", "bar", WithExpiration(time.Nanosecond))
-			time.Sleep(time.Nanosecond)
+			clock.AdvanceTime(time.Minute)
 			c.RemoveAll()
 			if _, ok := c.Get("foo"); ok {
 				t.Errorf("imcache.Get(%s) = _, %t, want _, false", "foo", ok)
@@ -849,11 +877,15 @@ func TestImcache_RemoveExpired(t *testing.T) {
 		t.Run(cache.name, func(t *testing.T) {
 			c := cache.create()
 			c.Set("foo", "foo", WithNoExpiration())
+			c.Set("foobar", "foobar", WithExpiration(time.Hour))
 			c.Set("bar", "bar", WithExpiration(time.Nanosecond))
-			time.Sleep(time.Nanosecond)
+			clock.AdvanceTime(time.Minute)
 			c.RemoveExpired()
 			if _, ok := c.Get("foo"); !ok {
 				t.Errorf("imcache.Get(%s) = _, %t, want _, true", "foo", ok)
+			}
+			if _, ok := c.Get("foobar"); !ok {
+				t.Errorf("imcache.Get(%s) = _, %t, want _, true", "foobar", ok)
 			}
 			if _, ok := c.Get("bar"); ok {
 				t.Errorf("imcache.Get(%s) = _, %t, want _, false", "bar", ok)
@@ -867,9 +899,9 @@ func TestImcache_GetAll(t *testing.T) {
 		t.Run(cache.name, func(t *testing.T) {
 			c := cache.create()
 			c.Set("foo", "foo", WithNoExpiration())
-			c.Set("foobar", "foobar", WithNoExpiration())
+			c.Set("foobar", "foobar", WithExpiration(time.Hour))
 			c.Set("bar", "bar", WithExpiration(time.Nanosecond))
-			time.Sleep(time.Nanosecond)
+			clock.AdvanceTime(2 * time.Nanosecond)
 			got := c.GetAll()
 			want := map[string]string{
 				"foo":    "foo",
@@ -888,7 +920,7 @@ func TestImcache_GetAll_SlidingExpiration(t *testing.T) {
 			c := cache.create()
 			c.Set("foo", "foo", WithSlidingExpiration(500*time.Millisecond))
 			c.Set("bar", "bar", WithSlidingExpiration(500*time.Millisecond))
-			time.Sleep(300 * time.Millisecond)
+			clock.AdvanceTime(300 * time.Millisecond)
 			want := map[string]string{
 				"foo": "foo",
 				"bar": "bar",
@@ -896,11 +928,11 @@ func TestImcache_GetAll_SlidingExpiration(t *testing.T) {
 			if got := c.GetAll(); !reflect.DeepEqual(got, want) {
 				t.Errorf("imcache.GetAll() = %v, want %v", got, want)
 			}
-			time.Sleep(300 * time.Millisecond)
+			clock.AdvanceTime(300 * time.Millisecond)
 			if got := c.GetAll(); !reflect.DeepEqual(got, want) {
 				t.Errorf("imcache.GetAll() = %v, want %v", got, want)
 			}
-			time.Sleep(500 * time.Millisecond)
+			clock.AdvanceTime(501 * time.Millisecond)
 			want = map[string]string{}
 			if got := c.GetAll(); !reflect.DeepEqual(got, want) {
 				t.Errorf("imcache.GetAll() = %v, want %v", got, want)
@@ -925,6 +957,7 @@ func TestImcache_Len(t *testing.T) {
 }
 
 func TestImcache_DefaultExpiration(t *testing.T) {
+	expiration := 500 * time.Millisecond
 	caches := []struct {
 		create func() imcache[string, string]
 		name   string
@@ -932,21 +965,20 @@ func TestImcache_DefaultExpiration(t *testing.T) {
 		{
 			name: "Cache",
 			create: func() imcache[string, string] {
-				return New(WithDefaultExpirationOption[string, string](500 * time.Millisecond))
+				return New(WithDefaultExpirationOption[string, string](expiration))
 			},
 		},
 		{
 			name: "Sharded",
 			create: func() imcache[string, string] {
-				return NewSharded[string](8, DefaultStringHasher64{}, WithDefaultExpirationOption[string, string](500*time.Millisecond))
+				return NewSharded[string](8, DefaultStringHasher64{}, WithDefaultExpirationOption[string, string](expiration))
 			},
 		},
 	}
 	for _, cache := range caches {
 		t.Run(cache.name, func(t *testing.T) {
 			c := cache.create()
-			c.Set("foo", "foo", WithDefaultExpiration())
-			time.Sleep(500 * time.Millisecond)
+			clock.AdvanceTime(expiration + time.Nanosecond)
 			if _, ok := c.Get("foo"); ok {
 				t.Errorf("imcache.Get(%s) = _, %t, want _, false", "foo", ok)
 			}
@@ -962,6 +994,7 @@ func TestCache_DefaultExpiration_LessOrEqual0(t *testing.T) {
 }
 
 func TestImcache_DefaultSlidingExpiration(t *testing.T) {
+	expiration := time.Hour
 	caches := []struct {
 		create func() imcache[string, string]
 		name   string
@@ -969,13 +1002,13 @@ func TestImcache_DefaultSlidingExpiration(t *testing.T) {
 		{
 			name: "Cache",
 			create: func() imcache[string, string] {
-				return New(WithDefaultSlidingExpirationOption[string, string](500 * time.Millisecond))
+				return New(WithDefaultSlidingExpirationOption[string, string](expiration))
 			},
 		},
 		{
 			name: "Sharded",
 			create: func() imcache[string, string] {
-				return NewSharded[string](8, DefaultStringHasher64{}, WithDefaultSlidingExpirationOption[string, string](500*time.Millisecond))
+				return NewSharded[string](8, DefaultStringHasher64{}, WithDefaultSlidingExpirationOption[string, string](expiration))
 			},
 		},
 	}
@@ -983,15 +1016,15 @@ func TestImcache_DefaultSlidingExpiration(t *testing.T) {
 		t.Run(cache.name, func(t *testing.T) {
 			c := cache.create()
 			c.Set("foo", "foo", WithDefaultExpiration())
-			time.Sleep(300 * time.Millisecond)
+			clock.AdvanceTime(expiration - time.Nanosecond)
 			if _, ok := c.Get("foo"); !ok {
 				t.Errorf("imcache.Get(%s) = _, %t, want _, true", "foo", ok)
 			}
-			time.Sleep(300 * time.Millisecond)
+			clock.AdvanceTime(expiration)
 			if _, ok := c.Get("foo"); !ok {
 				t.Errorf("imcache.Get(%s) = _, %t, want _, true", "foo", ok)
 			}
-			time.Sleep(500 * time.Millisecond)
+			clock.AdvanceTime(expiration + time.Nanosecond)
 			if _, ok := c.Get("foo"); ok {
 				t.Errorf("imcache.Get(%s) = _, %t, want _, false", "foo", ok)
 			}
@@ -1097,74 +1130,6 @@ func (m *evictionCallbackMock[K, V]) Reset() {
 	m.calls = nil
 }
 
-func TestImcache_Cleaner(t *testing.T) {
-	evictioncMock := &evictionCallbackMock[string, string]{}
-	caches := []struct {
-		create func() imcache[string, string]
-		name   string
-	}{
-		{
-			name: "Cache",
-			create: func() imcache[string, string] {
-				return New(WithEvictionCallbackOption(evictioncMock.Callback), WithCleanerOption[string, string](20*time.Millisecond))
-			},
-		},
-		{
-			name: "Sharded",
-			create: func() imcache[string, string] {
-				return NewSharded[string](8, DefaultStringHasher64{}, WithEvictionCallbackOption(evictioncMock.Callback), WithCleanerOption[string, string](20*time.Millisecond))
-			},
-		},
-	}
-	for _, cache := range caches {
-		t.Run(cache.name, func(t *testing.T) {
-			defer evictioncMock.Reset()
-			c := cache.create()
-			c.Set("foo", "foo", WithExpiration(time.Millisecond))
-			c.Set("bar", "bar", WithExpiration(time.Millisecond))
-			c.Set("foobar", "foobar", WithExpiration(100*time.Millisecond))
-			time.Sleep(30 * time.Millisecond)
-			evictioncMock.HasEventuallyBeenCalledWith(t, "foo", "foo", EvictionReasonExpired)
-			evictioncMock.HasEventuallyBeenCalledWith(t, "bar", "bar", EvictionReasonExpired)
-			evictioncMock.HasNotBeenCalledWith(t, "foobar", "foobar", EvictionReasonExpired)
-			time.Sleep(200 * time.Millisecond)
-			evictioncMock.HasEventuallyBeenCalledWith(t, "foobar", "foobar", EvictionReasonExpired)
-		})
-	}
-}
-
-func TestImcache_Cleaner_IntervalLessOrEqual0(t *testing.T) {
-	evictioncMock := &evictionCallbackMock[string, string]{}
-	caches := []struct {
-		create func() imcache[string, string]
-		name   string
-	}{
-		{
-			name: "Cache",
-			create: func() imcache[string, string] {
-				return New(WithEvictionCallbackOption(evictioncMock.Callback), WithCleanerOption[string, string](0))
-			},
-		},
-		{
-			name: "Sharded",
-			create: func() imcache[string, string] {
-				return NewSharded[string](8, DefaultStringHasher64{}, WithEvictionCallbackOption(evictioncMock.Callback), WithCleanerOption[string, string](-1))
-			},
-		},
-	}
-	for _, cache := range caches {
-		t.Run(cache.name, func(t *testing.T) {
-			defer evictioncMock.Reset()
-			c := cache.create()
-			c.Set("foo", "foo", WithExpiration(time.Millisecond))
-			c.Set("bar", "bar", WithExpiration(time.Millisecond))
-			c.Set("foobar", "foobar", WithExpiration(100*time.Millisecond))
-			time.Sleep(200 * time.Millisecond)
-			evictioncMock.HasNotBeenCalled(t)
-		})
-	}
-}
-
 func TestImcache_Close(t *testing.T) {
 	caches := []struct {
 		create func() imcache[string, string]
@@ -1266,8 +1231,9 @@ func TestImcache_Get_EvictionCallback(t *testing.T) {
 		t.Run(cache.name, func(t *testing.T) {
 			defer evictioncMock.Reset()
 			c := cache.create(evictioncMock.Callback)
-			c.Set("foo", "foo", WithExpiration(time.Nanosecond))
-			time.Sleep(time.Nanosecond)
+			exp := time.Nanosecond
+			c.Set("foo", "foo", WithExpiration(exp))
+			clock.AdvanceTime(exp + time.Nanosecond)
 			if _, ok := c.Get("foo"); ok {
 				t.Errorf("imcache.Get(%s) = _, %t, want _, false", "foo", ok)
 			}
@@ -1284,8 +1250,8 @@ func TestImcache_GetMultiple_EvictionCallback(t *testing.T) {
 			c := cache.create(evictionMock.Callback)
 			c.Set("foo", "foo", WithExpiration(time.Nanosecond))
 			c.Set("bar", "bar", WithExpiration(time.Nanosecond))
-			c.Set("foobar", "foobar", WithSlidingExpiration(100*time.Millisecond))
-			time.Sleep(time.Nanosecond)
+			c.Set("foobar", "foobar", WithSlidingExpiration(time.Minute))
+			clock.AdvanceTime(time.Second)
 			want := map[string]string{
 				"foobar": "foobar",
 			}
@@ -1294,7 +1260,7 @@ func TestImcache_GetMultiple_EvictionCallback(t *testing.T) {
 			}
 			evictionMock.HasEventuallyBeenCalledWith(t, "foo", "foo", EvictionReasonExpired)
 			evictionMock.HasEventuallyBeenCalledWith(t, "bar", "bar", EvictionReasonExpired)
-			time.Sleep(100 * time.Millisecond)
+			clock.AdvanceTime(time.Hour)
 			if got := c.GetMultiple("foo", "bar", "foobar"); got == nil || len(got) != 0 {
 				t.Errorf("imcache.GetMultiple(_) = %v, want empty", got)
 			}
@@ -1310,7 +1276,7 @@ func TestImcache_Peek_EvictionCallback(t *testing.T) {
 			defer evictioncMock.Reset()
 			c := cache.create(evictioncMock.Callback)
 			c.Set("foo", "foo", WithExpiration(time.Nanosecond))
-			time.Sleep(time.Nanosecond)
+			clock.AdvanceTime(time.Millisecond)
 			if _, ok := c.Peek("foo"); ok {
 				t.Fatal("got imcache.Peek(_) = _, true, want _, false")
 			}
@@ -1328,7 +1294,7 @@ func TestImcache_PeekMultiple_EvictionCallback(t *testing.T) {
 			c := cache.create(evictioncMock.Callback)
 			c.Set("foo", "foo", WithExpiration(time.Nanosecond))
 			c.Set("bar", "bar", WithExpiration(time.Nanosecond))
-			time.Sleep(time.Nanosecond)
+			clock.AdvanceTime(time.Microsecond)
 			want := make(map[string]string)
 			if got := c.PeekMultiple("foo"); !reflect.DeepEqual(got, want) {
 				t.Fatalf("got imcache.PeekMultiple(_) = %v, want %v", got, want)
@@ -1349,7 +1315,7 @@ func TestImcache_PeekAll_EvictionCallback(t *testing.T) {
 			c.Set("foo", "foo", WithExpiration(time.Nanosecond))
 			c.Set("bar", "bar", WithExpiration(time.Nanosecond))
 			c.Set("foobar", "foobar", WithNoExpiration())
-			time.Sleep(time.Nanosecond)
+			clock.AdvanceTime(time.Microsecond)
 			want := map[string]string{"foobar": "foobar"}
 			if got := c.PeekAll(); !reflect.DeepEqual(got, want) {
 				t.Fatalf("got imcache.PeekAll() = %v, want %v", got, want)
@@ -1369,7 +1335,7 @@ func TestImcache_Set_EvictionCallback(t *testing.T) {
 			c := cache.create(evictioncMock.Callback)
 			c.Set("foo", "foo", WithExpiration(time.Nanosecond))
 			c.Set("bar", "bar", WithNoExpiration())
-			time.Sleep(time.Nanosecond)
+			clock.AdvanceTime(time.Microsecond)
 			c.Set("foo", "bar", WithNoExpiration())
 			evictioncMock.HasEventuallyBeenCalledWith(t, "foo", "foo", EvictionReasonExpired)
 			c.Set("bar", "foo", WithNoExpiration())
@@ -1387,7 +1353,7 @@ func TestImcache_GetOrSet_EvictionCallback(t *testing.T) {
 			if _, ok := c.GetOrSet("foo", "foo", WithExpiration(time.Nanosecond)); ok {
 				t.Errorf("imcache.GetOrSet(%s, _, _) = _, %t, want _, false", "foo", ok)
 			}
-			time.Sleep(time.Nanosecond)
+			clock.AdvanceTime(time.Microsecond)
 			if _, ok := c.GetOrSet("foo", "foo", WithExpiration(time.Nanosecond)); ok {
 				t.Errorf("imcache.GetOrSet(%s, _, _) = _, %t, want _, false", "foo", ok)
 			}
@@ -1404,7 +1370,7 @@ func TestImcache_Replace_EvictionCallback(t *testing.T) {
 			c := cache.create(evictioncMock.Callback)
 			c.Set("foo", "foo", WithExpiration(time.Nanosecond))
 			c.Set("bar", "bar", WithNoExpiration())
-			time.Sleep(time.Nanosecond)
+			clock.AdvanceTime(time.Microsecond)
 			if ok := c.Replace("foo", "bar", WithNoExpiration()); ok {
 				t.Errorf("imcache.Replace(%s, _, _) = %t, want false", "foo", ok)
 			}
@@ -1425,7 +1391,7 @@ func TestImcache_ReplaceWithFunc_EvictionCallback(t *testing.T) {
 			c := cache.create(evictioncMock.Callback)
 			c.Set("foo", "1", WithExpiration(time.Nanosecond))
 			c.Set("bar", "2", WithNoExpiration())
-			time.Sleep(time.Nanosecond)
+			clock.AdvanceTime(time.Microsecond)
 			if ok := c.ReplaceWithFunc("foo", func(string) string { return "997" }, WithNoExpiration()); ok {
 				t.Errorf("imcache.Replace(%s, _, _) = %t, want false", "foo", ok)
 			}
@@ -1446,7 +1412,7 @@ func TestImcache_CompareAndSwap_EvictionCallback(t *testing.T) {
 			c := cache.create(evictioncMock.Callback)
 			c.Set("foo", "1", WithExpiration(time.Nanosecond))
 			c.Set("bar", "2", WithNoExpiration())
-			time.Sleep(time.Nanosecond)
+			clock.AdvanceTime(time.Microsecond)
 			if swapped, present := c.CompareAndSwap("foo", "1", "997", func(_, _ string) bool { return true }, WithNoExpiration()); swapped || present {
 				t.Errorf("imcache.CompareAndSwap(%s, _, _, _, _) = %t, %t, want false, false", "foo", swapped, present)
 			}
@@ -1466,7 +1432,7 @@ func TestImcache_ReplaceKey_EvictionCallback(t *testing.T) {
 			defer evictioncMock.Reset()
 			c := cache.create(evictioncMock.Callback)
 			c.Set("foo", "foo", WithExpiration(time.Nanosecond))
-			time.Sleep(time.Nanosecond)
+			clock.AdvanceTime(time.Microsecond)
 			if ok := c.ReplaceKey("foo", "bar", WithNoExpiration()); ok {
 				t.Errorf("imcache.ReplaceKey(%s, _, _) = %t, want false", "foo", ok)
 			}
@@ -1483,7 +1449,7 @@ func TestImcache_ReplaceKey_EvictionCallback(t *testing.T) {
 			evictioncMock.HasEventuallyBeenCalledWith(t, "bar", "foo", EvictionReasonKeyReplaced)
 			evictioncMock.HasEventuallyBeenCalledWith(t, "foobar", "foobar", EvictionReasonReplaced)
 			c.Set("barbar", "barbar", WithExpiration(time.Nanosecond))
-			time.Sleep(time.Nanosecond)
+			clock.AdvanceTime(time.Microsecond)
 			if ok := c.ReplaceKey("foobar", "barbar", WithNoExpiration()); !ok {
 				t.Errorf("imcache.ReplaceKey(%s, _, _) = %t, want true", "foobar", ok)
 			}
@@ -1500,7 +1466,7 @@ func TestImcache_Remove_EvictionCallback(t *testing.T) {
 			c := cache.create(evictioncMock.Callback)
 			c.Set("foo", "foo", WithExpiration(time.Nanosecond))
 			c.Set("bar", "bar", WithNoExpiration())
-			time.Sleep(time.Nanosecond)
+			clock.AdvanceTime(time.Microsecond)
 			if ok := c.Remove("foo"); ok {
 				t.Errorf("imcache.Remove(%s) = %t, want false", "foo", ok)
 			}
@@ -1521,7 +1487,7 @@ func TestImcache_RemoveAll_EvictionCallback(t *testing.T) {
 			c := New(WithEvictionCallbackOption(evictioncMock.Callback))
 			c.Set("foo", "foo", WithExpiration(time.Nanosecond))
 			c.Set("bar", "bar", WithNoExpiration())
-			time.Sleep(time.Nanosecond)
+			clock.AdvanceTime(time.Microsecond)
 			c.RemoveAll()
 			evictioncMock.HasEventuallyBeenCalledWith(t, "foo", "foo", EvictionReasonExpired)
 			evictioncMock.HasEventuallyBeenCalledWith(t, "bar", "bar", EvictionReasonRemoved)
@@ -1537,7 +1503,7 @@ func TestImcache_RemoveExpired_EvictionCallback(t *testing.T) {
 			c := cache.create(evictioncMock.Callback)
 			c.Set("foo", "foo", WithExpiration(time.Nanosecond))
 			c.Set("bar", "bar", WithNoExpiration())
-			time.Sleep(time.Nanosecond)
+			clock.AdvanceTime(time.Microsecond)
 			c.RemoveExpired()
 			evictioncMock.HasEventuallyBeenCalledWith(t, "foo", "foo", EvictionReasonExpired)
 		})
@@ -1553,7 +1519,7 @@ func TestImcache_GetAll_EvictionCallback(t *testing.T) {
 			c.Set("foo", "foo", WithNoExpiration())
 			c.Set("foobar", "foobar", WithSlidingExpiration(time.Second))
 			c.Set("bar", "bar", WithExpiration(time.Nanosecond))
-			time.Sleep(time.Nanosecond)
+			clock.AdvanceTime(time.Microsecond)
 			got := c.GetAll()
 			want := map[string]string{
 				"foo":    "foo",
@@ -1625,6 +1591,7 @@ func TestCache_MaxEntriesLimit_EvictionPolicyLRU(t *testing.T) {
 			c.Set("one", 1, WithNoExpiration())
 			c.Set("two", 2, WithNoExpiration())
 			c.Set("three", 3, WithNoExpiration())
+			fourExp := time.Nanosecond
 			c.Set("four", 4, WithExpiration(time.Nanosecond))
 			c.Set("five", 5, WithNoExpiration())
 			// LRU queue: five -> four -> three -> two -> one.
@@ -1646,6 +1613,8 @@ func TestCache_MaxEntriesLimit_EvictionPolicyLRU(t *testing.T) {
 			c.Set("seven", 7, WithNoExpiration())
 			// LRU queue: seven -> two -> six -> five -> four.
 			evicted(t, "three", 3, EvictionReasonMaxEntriesExceeded)
+
+			clock.AdvanceTime(fourExp + time.Nanosecond)
 
 			// Set should evict the last entry from the queue if the size is exceeded
 			// and if the entry is expired the eviction reason should be EvictionReasonExpired.
@@ -1711,8 +1680,10 @@ func TestCache_MaxEntriesLimit_EvictionPolicyLRU(t *testing.T) {
 			// LRU queue: empty.
 			c.Set("fourteen", 14, WithNoExpiration())
 			c.Set("fifteen", 15, WithNoExpiration())
-			c.Set("sixteen", 16, WithExpiration(time.Nanosecond))
-			c.Set("seventeen", 17, WithExpiration(100*time.Millisecond))
+			sixteenExp := time.Nanosecond
+			c.Set("sixteen", 16, WithExpiration(sixteenExp))
+			seventeenExp := time.Millisecond
+			c.Set("seventeen", 17, WithExpiration(seventeenExp))
 			c.Set("eighteen", 18, WithNoExpiration())
 			// LRU queue: eighteen -> seventeen -> sixteen -> fifteen -> fourteen.
 			if _, ok := c.Get("fourteen"); !ok {
@@ -1724,11 +1695,11 @@ func TestCache_MaxEntriesLimit_EvictionPolicyLRU(t *testing.T) {
 				t.Fatalf("got Cache.PeekMultiple(_) = %v, want %v", got, want)
 			}
 			// LRU queue: fourteen -> eighteen -> seventeen -> sixteen -> fifteen.
-			c.Set("nineteen", 19, WithExpiration(time.Nanosecond))
+			c.Set("nineteen", 19, WithExpiration(sixteenExp))
 			// LRU queue: nineteen -> fourteen -> eighteen -> seventeen -> sixteen.
 			evicted(t, "fifteen", 15, EvictionReasonMaxEntriesExceeded)
-			// To make sure nineteen expired.
-			time.Sleep(time.Nanosecond)
+			// Make sixteen and nineteen expired.
+			clock.AdvanceTime(sixteenExp + time.Nanosecond)
 
 			// RemoveExpired should not mess with the LRU queue.
 			c.RemoveExpired()
@@ -1739,7 +1710,8 @@ func TestCache_MaxEntriesLimit_EvictionPolicyLRU(t *testing.T) {
 				t.Fatal("got Cache.Get(_) = _, false, want _, true")
 			}
 			// LRU queue: seventeen -> twenty -> fourteen -> eighteen.
-			c.Set("twentyone", 21, WithExpiration(200*time.Millisecond))
+			twentyoneExp := time.Minute
+			c.Set("twentyone", 21, WithExpiration(twentyoneExp))
 			// LRU queue: twentyone -> seventeen -> twenty -> fourteen -> eighteen.
 			if _, ok := c.Get("eighteen"); !ok {
 				t.Fatal("got Cache.Get(_) = _, false, want _, true")
@@ -1759,14 +1731,14 @@ func TestCache_MaxEntriesLimit_EvictionPolicyLRU(t *testing.T) {
 			}
 			// LRU queue: twenty -> twentytwo -> eighteen -> twentyone -> seventeen.
 			// Wait until seventeen is expired.
-			time.Sleep(100 * time.Millisecond)
+			clock.AdvanceTime(seventeenExp + time.Nanosecond)
 			// seventeen is expired, but it's still in the cache.
 			c.Set("twentythree", 23, WithNoExpiration())
 			// LRU queue: twentythree -> twenty -> twentytwo -> eighteen -> twentyone.
 			// seventeen should be evicted with an expired reason instead of max entries exceeded.
 			evicted(t, "seventeen", 17, EvictionReasonExpired)
 			// Wait until twentyone is expired.
-			time.Sleep(100 * time.Millisecond)
+			clock.AdvanceTime(twentyoneExp + time.Nanosecond)
 			// twentyone is expired, but it's still in the cache.
 			if _, ok := c.GetOrSet("twentyfour", 24, WithNoExpiration()); ok {
 				t.Fatal("got Cache.GetOrSet(_, _, _) = _, true, want _, false")
@@ -1840,7 +1812,8 @@ func TestSharded_ReplaceKey_MaxEntriesLimit_EvictionPolicyLRU(t *testing.T) {
 			s.Set(2, 2, WithNoExpiration())
 			s.Set(3, 3, WithNoExpiration())
 			s.Set(4, 4, WithNoExpiration())
-			if ok := s.ReplaceKey(4, 5, WithExpiration(time.Nanosecond)); !ok {
+			exp := time.Nanosecond
+			if ok := s.ReplaceKey(4, 5, WithExpiration(exp)); !ok {
 				t.Fatal("Sharded.ReplaceKey(_, _, _) = false, want true")
 			}
 			evicted(t, 4, 4, EvictionReasonKeyReplaced)
@@ -1848,7 +1821,7 @@ func TestSharded_ReplaceKey_MaxEntriesLimit_EvictionPolicyLRU(t *testing.T) {
 			if _, ok := s.Get(3); !ok {
 				t.Fatal("Sharded.Get(_) = _, false, want _, true")
 			}
-			time.Sleep(time.Nanosecond)
+			clock.AdvanceTime(exp + time.Nanosecond)
 			if ok := s.ReplaceKey(2, 7, WithNoExpiration()); !ok {
 				t.Fatal("Sharded.ReplaceKey(_, _, _) = false, want true")
 			}
@@ -1925,6 +1898,9 @@ func TestCache_MaxEntriesLimit_EvictionPolicyLFU(t *testing.T) {
 			// LFU queue: two -> six -> five -> four -> seven.
 			evicted(t, "three", 3, EvictionReasonMaxEntriesExceeded)
 
+			// Make "seven" expired.
+			clock.AdvanceTime(2 * time.Nanosecond)
+
 			// Set should evict the last entry from the queue if the size is exceeded
 			// and if the entry is expired the eviction reason should be EvictionReasonExpired.
 			c.Set("eight", 8, WithNoExpiration())
@@ -1985,6 +1961,7 @@ func TestCache_MaxEntriesLimit_EvictionPolicyLFU(t *testing.T) {
 			c.Set("seventeen", 17, WithExpiration(time.Nanosecond))
 			c.Set("eighteen", 18, WithNoExpiration())
 			c.Set("nineteen", 19, WithExpiration(time.Nanosecond))
+			clock.AdvanceTime(2 * time.Nanosecond)
 			// LFU queue: nineteen -> eighteen -> seventeen -> sixteen -> fifteen.
 			c.RemoveExpired()
 			// LFU queue: eighteen -> sixteen -> fifteen.
@@ -2077,7 +2054,8 @@ func TestSharded_ReplaceKey_MaxEntriesLimit_EvictionPolicyLFU(t *testing.T) {
 			s.Set(2, 2, WithNoExpiration())
 			s.Set(3, 3, WithNoExpiration())
 			s.Set(4, 4, WithNoExpiration())
-			if ok := s.ReplaceKey(4, 5, WithExpiration(50*time.Millisecond)); !ok {
+			exp := time.Hour
+			if ok := s.ReplaceKey(4, 5, WithExpiration(exp)); !ok {
 				t.Fatal("Sharded.ReplaceKey(_, _, _) = false, want true")
 			}
 			evicted(t, 4, 4, EvictionReasonKeyReplaced)
@@ -2091,7 +2069,7 @@ func TestSharded_ReplaceKey_MaxEntriesLimit_EvictionPolicyLFU(t *testing.T) {
 			if _, ok := s.Get(5); !ok {
 				t.Fatal("Sharded.Get(_) = _, false, want _, true")
 			}
-			time.Sleep(50 * time.Millisecond)
+			clock.AdvanceTime(exp + time.Nanosecond)
 			if ok := s.ReplaceKey(2, 7, WithNoExpiration()); !ok {
 				t.Fatal("Sharded.ReplaceKey(_, _, _) = false, want true")
 			}
@@ -2489,9 +2467,9 @@ func TestEntry_expired(t *testing.T) {
 }
 
 func TestEntry_slide(t *testing.T) {
-	entry := entry[string, string]{val: "foo", exp: expiration{date: time.Now().Add(5 * time.Second).UnixNano(), sliding: 5 * time.Second}}
-	time.Sleep(2 * time.Second)
-	now := time.Now()
+	entry := entry[string, string]{val: "foo", exp: expiration{date: clock.Now().Add(5 * time.Second).UnixNano(), sliding: 5 * time.Second}}
+	clock.AdvanceTime(2 * time.Second)
+	now := clock.Now()
 	entry.slide(now)
 	if want := now.Add(5 * time.Second).UnixNano(); entry.exp.date != want {
 		t.Errorf("entry.slide() results in expiration %v, want %v", entry.exp.date, want)
