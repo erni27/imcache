@@ -13,6 +13,16 @@ import (
 	"time"
 )
 
+// nowf is a func returning current time. It simply calls time.Now()
+// under the hood. It should be changed only for the testing purposes.
+//
+// This global variable is not ideal but it simplifies a lot, making
+// zero value Cache simple. No need to init a field level clock, that
+// is important for read-only (Peek*) methods.
+var nowf = func() time.Time {
+	return time.Now()
+}
+
 // New returns a new Cache instance.
 //
 // By default, a returned Cache has no default expiration, no default sliding
@@ -96,7 +106,7 @@ func (c *Cache[K, V]) init() {
 //
 // If it encounters an expired entry, the expired entry is evicted.
 func (c *Cache[K, V]) Get(key K) (V, bool) {
-	now := time.Now()
+	now := nowf()
 	var zero V
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -128,7 +138,7 @@ func (c *Cache[K, V]) Get(key K) (V, bool) {
 //
 // If it encounters an expired entry, the expired entry is evicted.
 func (c *Cache[K, V]) GetMultiple(keys ...K) map[K]V {
-	return c.getMultiple(time.Now(), keys...)
+	return c.getMultiple(nowf(), keys...)
 }
 
 func (c *Cache[K, V]) getMultiple(now time.Time, keys ...K) map[K]V {
@@ -188,7 +198,7 @@ func (c *Cache[K, V]) getMultiple(now time.Time, keys ...K) map[K]V {
 //
 // If it encounters an expired entry, the expired entry is evicted.
 func (c *Cache[K, V]) GetAll() map[K]V {
-	return c.getAll(time.Now())
+	return c.getAll(nowf())
 }
 
 func (c *Cache[K, V]) getAll(now time.Time) map[K]V {
@@ -246,7 +256,7 @@ func (c *Cache[K, V]) getAll(now time.Time) map[K]V {
 // If the max entries limit is set, it doesn't update
 // the entry's position in the eviction queue.
 func (c *Cache[K, V]) Peek(key K) (V, bool) {
-	now := time.Now()
+	now := nowf()
 	var zero V
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -269,7 +279,7 @@ func (c *Cache[K, V]) Peek(key K) (V, bool) {
 // If the max entries limit is set, it doesn't update
 // the encountered entry's position in the eviction queue.
 func (c *Cache[K, V]) PeekMultiple(keys ...K) map[K]V {
-	return c.peekMultiple(time.Now(), keys...)
+	return c.peekMultiple(nowf(), keys...)
 }
 
 func (c *Cache[K, V]) peekMultiple(now time.Time, keys ...K) map[K]V {
@@ -296,7 +306,7 @@ func (c *Cache[K, V]) peekMultiple(now time.Time, keys ...K) map[K]V {
 // If the max entries limit is set, it doesn't update
 // the encountered entry's position in the eviction queue.
 func (c *Cache[K, V]) PeekAll() map[K]V {
-	return c.peekAll(time.Now())
+	return c.peekAll(nowf())
 }
 
 func (c *Cache[K, V]) peekAll(now time.Time) map[K]V {
@@ -324,7 +334,7 @@ func (c *Cache[K, V]) peekAll(now time.Time) map[K]V {
 // instead. If you don't want to add a new entry if it doesn't exist, use
 // the Replace method instead.
 func (c *Cache[K, V]) Set(key K, val V, exp Expiration) {
-	now := time.Now()
+	now := nowf()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
@@ -374,7 +384,7 @@ func (c *Cache[K, V]) Set(key K, val V, exp Expiration) {
 //
 // If it encounters an expired entry, the expired entry is evicted.
 func (c *Cache[K, V]) GetOrSet(key K, val V, exp Expiration) (value V, present bool) {
-	now := time.Now()
+	now := nowf()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
@@ -427,7 +437,7 @@ func (c *Cache[K, V]) GetOrSet(key K, val V, exp Expiration) (value V, present b
 //
 // If you want to add or replace an entry, use the Set method instead.
 func (c *Cache[K, V]) Replace(key K, val V, exp Expiration) (present bool) {
-	now := time.Now()
+	now := nowf()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
@@ -501,7 +511,7 @@ func Decrement[V Number](old V) V {
 //		imcache.WithNoExpiration(),
 //	)
 func (c *Cache[K, V]) ReplaceWithFunc(key K, f func(current V) (new V), exp Expiration) (present bool) {
-	now := time.Now()
+	now := nowf()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
@@ -535,7 +545,7 @@ func (c *Cache[K, V]) ReplaceWithFunc(key K, f func(current V) (new V), exp Expi
 //
 // If it encounters an expired entry, the expired entry is evicted.
 func (c *Cache[K, V]) ReplaceKey(old, new K, exp Expiration) (present bool) {
-	now := time.Now()
+	now := nowf()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
@@ -586,7 +596,7 @@ func (c *Cache[K, V]) ReplaceKey(old, new K, exp Expiration) (present bool) {
 //
 // If it encounters an expired entry, the expired entry is evicted.
 func (c *Cache[K, V]) CompareAndSwap(key K, expected, new V, compare func(V, V) bool, exp Expiration) (swapped, present bool) {
-	now := time.Now()
+	now := nowf()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
@@ -626,7 +636,7 @@ func (c *Cache[K, V]) CompareAndSwap(key K, expected, new V, compare func(V, V) 
 // It results in calling the eviction callback with EvictionReasonExpired,
 // not EvictionReasonRemoved. If entry is expired, it returns false.
 func (c *Cache[K, V]) Remove(key K) (present bool) {
-	now := time.Now()
+	now := nowf()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
@@ -658,7 +668,7 @@ func (c *Cache[K, V]) Remove(key K) (present bool) {
 // It results in calling the eviction callback with EvictionReasonExpired,
 // not EvictionReasonRemoved.
 func (c *Cache[K, V]) RemoveAll() {
-	c.removeAll(time.Now())
+	c.removeAll(nowf())
 }
 
 func (c *Cache[K, V]) removeAll(now time.Time) {
@@ -688,7 +698,7 @@ func (c *Cache[K, V]) removeAll(now time.Time) {
 //
 // If an eviction callback is set, it is called for each removed entry.
 func (c *Cache[K, V]) RemoveExpired() {
-	c.removeExpired(time.Now())
+	c.removeExpired(nowf())
 }
 
 func (c *Cache[K, V]) removeExpired(now time.Time) {
@@ -860,7 +870,7 @@ func (s *Sharded[K, V]) Get(key K) (value V, present bool) {
 //
 // If it encounters an expired entry, the expired entry is evicted.
 func (s *Sharded[K, V]) GetMultiple(keys ...K) map[K]V {
-	now := time.Now()
+	now := nowf()
 	keysByShard := make(map[int][]K)
 	for _, key := range keys {
 		idx := s.shardIndex(key)
@@ -891,7 +901,7 @@ func (s *Sharded[K, V]) GetMultiple(keys ...K) map[K]V {
 //
 // If it encounters an expired entry, the expired entry is evicted.
 func (s *Sharded[K, V]) GetAll() map[K]V {
-	now := time.Now()
+	now := nowf()
 	var n int
 	ms := make([]map[K]V, 0, len(s.shards))
 	for _, shard := range s.shards {
@@ -932,7 +942,7 @@ func (s *Sharded[K, V]) Peek(key K) (V, bool) {
 // If the max entries limit is set, it doesn't update
 // the encountered entry's position in the eviction queue.
 func (s *Sharded[K, V]) PeekMultiple(keys ...K) map[K]V {
-	now := time.Now()
+	now := nowf()
 	keysByShard := make(map[int][]K)
 	for _, key := range keys {
 		idx := s.shardIndex(key)
@@ -966,7 +976,7 @@ func (s *Sharded[K, V]) PeekMultiple(keys ...K) map[K]V {
 // If the max entries limit is set, it doesn't update
 // the encountered entry's position in the eviction queue.
 func (s *Sharded[K, V]) PeekAll() map[K]V {
-	now := time.Now()
+	now := nowf()
 	var n int
 	ms := make([]map[K]V, 0, len(s.shards))
 	for _, shard := range s.shards {
@@ -1049,7 +1059,7 @@ func (s *Sharded[K, V]) ReplaceWithFunc(key K, fn func(V) V, exp Expiration) (pr
 //
 // If it encounters an expired entry, the expired entry is evicted.
 func (s *Sharded[K, V]) ReplaceKey(old, new K, exp Expiration) (present bool) {
-	now := time.Now()
+	now := nowf()
 	oldShard := s.shard(old)
 	newShard := s.shard(new)
 	// Check if the old and new keys are in the same shard.
@@ -1158,7 +1168,7 @@ func (s *Sharded[K, V]) Remove(key K) (present bool) {
 // It results in calling the eviction callback with EvictionReasonExpired,
 // not EvictionReasonRemoved.
 func (s *Sharded[K, V]) RemoveAll() {
-	now := time.Now()
+	now := nowf()
 	for _, shard := range s.shards {
 		shard.removeAll(now)
 	}
@@ -1168,7 +1178,7 @@ func (s *Sharded[K, V]) RemoveAll() {
 //
 // If an eviction callback is set, it is called for each removed entry.
 func (s *Sharded[K, V]) RemoveExpired() {
-	now := time.Now()
+	now := nowf()
 	for _, shard := range s.shards {
 		shard.removeExpired(now)
 	}
